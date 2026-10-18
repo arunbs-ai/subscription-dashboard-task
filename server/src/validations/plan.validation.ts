@@ -5,7 +5,6 @@ const featureSchema = Joi.object({
   included: Joi.boolean().default(true),
 });
 
-// ─── Create Plan ──────────────────────────────────────────────────────────────
 export const createPlanSchema = Joi.object({
   name: Joi.string().trim().min(2).max(100).required().messages({
     'string.empty': 'Plan name is required.',
@@ -30,6 +29,8 @@ export const createPlanSchema = Joi.object({
     'array.min': 'At least one feature is required.',
     'any.required': 'Features are required.',
   }),
+  tier: Joi.string().valid('starter', 'pro', 'enterprise').default('pro'),
+  apiRequests: Joi.number().integer().min(0).default(50000),
   maxUsers: Joi.number().integer().min(1).default(1),
   maxProjects: Joi.number().integer().min(1).default(1),
   storageGB: Joi.number().min(0).default(5),
@@ -40,7 +41,6 @@ export const createPlanSchema = Joi.object({
   note: Joi.string().trim().allow('').optional(),
 });
 
-// ─── Update Plan ──────────────────────────────────────────────────────────────
 export const updatePlanSchema = Joi.object({
   name: Joi.string().trim().min(2).max(100).optional(),
   description: Joi.string().trim().min(5).max(500).optional(),
@@ -49,6 +49,8 @@ export const updatePlanSchema = Joi.object({
   currency: Joi.string().trim().uppercase().max(5).optional(),
   billingCycle: Joi.string().valid('monthly', 'yearly', 'both').optional(),
   features: Joi.array().items(featureSchema).min(1).optional(),
+  tier: Joi.string().valid('starter', 'pro', 'enterprise').optional(),
+  apiRequests: Joi.number().integer().min(0).optional(),
   maxUsers: Joi.number().integer().min(1).optional(),
   maxProjects: Joi.number().integer().min(1).optional(),
   storageGB: Joi.number().min(0).optional(),

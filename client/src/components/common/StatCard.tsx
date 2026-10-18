@@ -27,11 +27,11 @@ export const StatCard: React.FC<StatCardProps> = ({
       className={`bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-sm transition-all hover:shadow-md ${className}`}
     >
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+        <p className="text-xs font-medium tracking-wide text-slate-500 dark:text-slate-400">
           {title}
         </p>
         {icon && (
-          <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
+          <div className="p-2.5 rounded-xl bg-brand-50 dark:bg-brand-950/50 text-brand-600 dark:text-brand-400">
             {icon}
           </div>
         )}

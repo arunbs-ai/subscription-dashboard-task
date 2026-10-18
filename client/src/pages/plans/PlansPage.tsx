@@ -6,10 +6,17 @@ import {
   Sparkles,
   ArrowRight,
   CheckCircle,
+  CreditCard,
   Loader2,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../store';
 import { setBillingCycle, fetchActivePlans, fetchAdminPlans } from '../../store/slices/planSlice';
+import {
+  purchaseSubscriptionThunk,
+  fetchMySubscription,
+  fetchUserCards,
+} from '../../store/slices/subscriptionSlice';
+import { CardForm, CardFormValues, emptyCard, toCardPayload, validateCardForm } from '../../components/common/CardForm';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
@@ -23,11 +30,22 @@ export const PlansPage: React.FC = () => {
   const { plans, billingCycle, isLoading } = useAppSelector((state) => state.plans);
   const { isAuthenticated, user } = useAppSelector((state) => state.auth);
   const role = user?.role;
-  const currentSubscription = useAppSelector(
-    (state) => state.subscription.currentSubscription
+  const { currentSubscription, cards } = useAppSelector(
+    (state) => state.subscription
   );
 
-  // Fetch plans on mount
+  type ChangeKind = 'buy' | 'upgrade' | 'downgrade';
+  const [confirmPlanModal, setConfirmPlanModal] = useState<{
+    isOpen: boolean;
+    plan: Plan | null;
+    kind: ChangeKind;
+    price: number;
+  }>({ isOpen: false, plan: null, kind: 'buy', price: 0 });
+  const [cardValues, setCardValues] = useState<CardFormValues>(emptyCard);
+  const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [isPurchasing, setIsPurchasing] = useState(false);
+
   useEffect(() => {
     if (role === 'admin') {
       dispatch(fetchAdminPlans(true));
@@ -36,26 +54,54 @@ export const PlansPage: React.FC = () => {
     }
   }, [dispatch, role]);
 
-  // If user is Admin, render the dedicated Admin Plan Management Dashboard
+  useEffect(() => {
+    if (isAuthenticated && role !== 'admin') {
+      dispatch(fetchMySubscription());
+      dispatch(fetchUserCards());
+    }
+  }, [dispatch, isAuthenticated, role]);
+
   if (isAuthenticated && role === 'admin') {
     return <AdminPlansManagement />;
   }
 
-  // USER / PUBLIC VIEW — only active, non-deleted plans
   const activePlans = plans.filter((p) => p.isActive && !p.isDeleted);
 
+  const featureLabel = (f: Plan['features'][number]) => (typeof f === 'string' ? f : f.label);
+  const planHasFeature = (plan: Plan, label: string) =>
+    plan.features.some(
+      (f) =>
+        featureLabel(f).trim().toLowerCase() === label.trim().toLowerCase() &&
+        (typeof f === 'string' || f.included !== false)
+    );
+  const specRows = [
+    { label: 'Team Seats', value: (p: Plan) => String(p.limits?.teamMembers ?? p.maxUsers ?? '-') },
+    {
+      label: 'Monthly API Requests',
+      value: (p: Plan) => (p.apiRequests ?? p.limits?.apiRequests)?.toLocaleString() ?? '-',
+    },
+    { label: 'Cloud Storage', value: (p: Plan) => `${p.limits?.storageGB ?? p.storageGB ?? '-'} GB` },
+  ];
+  const featureRows: string[] = [];
+  activePlans.forEach((p) =>
+    p.features.forEach((f) => {
+      const label = featureLabel(f).trim();
+      if (label && !featureRows.some((r) => r.toLowerCase() === label.toLowerCase())) featureRows.push(label);
+    })
+  );
 
-  const [confirmPlanModal, setConfirmPlanModal] = useState<{
-    isOpen: boolean;
-    planId: string;
-    planName: string;
-    price: number;
-  }>({
-    isOpen: false,
-    planId: '',
-    planName: '',
-    price: 0,
-  });
+  const hasActivePlan = Boolean(currentSubscription);
+  const hasCard = cards.length > 0;
+  const defaultCard = cards.find((c) => c.isDefault) || cards[0];
+  const currentMonthly = currentSubscription?.plan?.monthlyPrice ?? currentSubscription?.price ?? 0;
+
+  const getChangeKind = (plan: Plan): ChangeKind => {
+    if (!hasActivePlan) return 'buy';
+    return plan.monthlyPrice >= currentMonthly ? 'upgrade' : 'downgrade';
+  };
+
+  const kindLabel = (kind: ChangeKind) =>
+    kind === 'buy' ? 'Buy Plan' : kind === 'upgrade' ? 'Upgrade' : 'Downgrade';
 
   const handlePlanClick = (plan: Plan) => {
     if (!isAuthenticated) {
@@ -63,12 +109,45 @@ export const PlansPage: React.FC = () => {
       return;
     }
     const price = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
-    setConfirmPlanModal({ isOpen: true, planId: plan._id || plan.id || '', planName: plan.name, price });
+    setCardValues(emptyCard);
+    setCardErrors({});
+    setPurchaseError(null);
+    setConfirmPlanModal({ isOpen: true, plan, kind: getChangeKind(plan), price });
   };
 
-  const handleConfirmSwitch = () => {
-    setConfirmPlanModal((prev) => ({ ...prev, isOpen: false }));
-    navigate('/dashboard');
+  const closeConfirm = () => setConfirmPlanModal((prev) => ({ ...prev, isOpen: false }));
+
+  const handleConfirmSwitch = async () => {
+    const plan = confirmPlanModal.plan;
+    if (!plan) return;
+    const planId = plan._id || plan.id || '';
+
+    let cardDetails: ReturnType<typeof toCardPayload> | undefined;
+    if (!hasCard) {
+      const errs = validateCardForm(cardValues);
+      if (Object.keys(errs).length) {
+        setCardErrors(errs);
+        return;
+      }
+      cardDetails = toCardPayload(cardValues);
+    }
+
+    setIsPurchasing(true);
+    setPurchaseError(null);
+    const result = await dispatch(
+      purchaseSubscriptionThunk({
+        planId,
+        billingCycle,
+        ...(cardDetails ? { cardDetails } : { cardId: defaultCard?._id }),
+      })
+    );
+    setIsPurchasing(false);
+    if (purchaseSubscriptionThunk.fulfilled.match(result)) {
+      closeConfirm();
+      navigate('/dashboard');
+    } else {
+      setPurchaseError((result.payload as string) || 'Purchase failed. Please try again.');
+    }
   };
 
   if (isLoading && plans.length === 0) {
@@ -84,7 +163,6 @@ export const PlansPage: React.FC = () => {
 
   return (
     <div className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-      {/* Title & Description */}
       <div className="text-center max-w-3xl mx-auto mb-12">
         <Badge variant="indigo" className="mb-3">
           Flexible & Transparent Pricing
@@ -96,7 +174,6 @@ export const PlansPage: React.FC = () => {
           Scale effortlessly from early startup to enterprise infrastructure. Switch or cancel whenever you need.
         </p>
 
-        {/* Billing Interval Toggle (Monthly / Yearly) */}
         <div className="mt-8 inline-flex items-center p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
           <button
             type="button"
@@ -119,14 +196,13 @@ export const PlansPage: React.FC = () => {
             }`}
           >
             <span>Annual Billing</span>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
+            <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
               Save 20%
             </span>
           </button>
         </div>
       </div>
 
-      {/* Plan Cards Grid for Users (Only Active Plans) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch mb-20">
         {activePlans.map((plan) => {
           const isCurrentPlan = isAuthenticated && currentSubscription?.planId === plan._id;
@@ -139,13 +215,13 @@ export const PlansPage: React.FC = () => {
               key={plan._id}
               className={`relative flex flex-col rounded-3xl transition-all duration-200 ${
                 plan.isFeatured
-                  ? 'bg-white dark:bg-slate-900 border-2 border-indigo-500 shadow-xl shadow-indigo-500/10 md:-translate-y-2'
+                  ? 'bg-white dark:bg-slate-900 border-2 border-brand-500 shadow-xl shadow-brand-500/10 md:-translate-y-2'
                   : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md'
               } p-7 sm:p-8`}
             >
               {plan.isFeatured && (
                 <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md shadow-indigo-500/20">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-brand-600 to-brand-600 text-white shadow-md shadow-brand-500/20">
                     <Sparkles className="w-3.5 h-3.5" />
                     Most Popular
                   </span>
@@ -168,7 +244,6 @@ export const PlansPage: React.FC = () => {
                 </p>
               </div>
 
-              {/* Price display */}
               <div className="mb-6 pb-6 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-baseline gap-1">
                   <span className="text-4xl font-extrabold text-slate-900 dark:text-white">
@@ -185,7 +260,6 @@ export const PlansPage: React.FC = () => {
                 </p>
               </div>
 
-              {/* Action Button */}
               <div className="mb-8">
                 {isCurrentPlan ? (
                   <Button
@@ -203,17 +277,16 @@ export const PlansPage: React.FC = () => {
                     rightIcon={<ArrowRight className="w-4 h-4" />}
                   >
                     {!isAuthenticated
-                      ? 'Get Started Free'
-                      : currentSubscription?.tier === 'enterprise'
-                      ? `Downgrade to ${plan.name}`
-                      : `Upgrade to ${plan.name}`}
+                      ? 'Get Started'
+                      : getChangeKind(plan) === 'buy'
+                      ? `Buy ${plan.name}`
+                      : `${kindLabel(getChangeKind(plan))} To ${plan.name}`}
                   </Button>
                 )}
               </div>
 
-              {/* Features list */}
               <div className="flex-1 space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                <p className="text-xs font-semibold tracking-wide text-slate-400 dark:text-slate-500">
                   Included in {plan.name}:
                 </p>
                 <ul className="space-y-2.5 text-xs text-slate-600 dark:text-slate-300">
@@ -241,128 +314,142 @@ export const PlansPage: React.FC = () => {
         })}
       </div>
 
-      {/* Feature Comparison Matrix */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-8 mb-12 overflow-x-auto shadow-sm">
-        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">
-          Detailed Feature Comparison
-        </h3>
-        <table className="w-full text-left border-collapse min-w-[600px]">
-          <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-800">
-              <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Resource & Capability
-              </th>
-              <th className="py-3 px-4 text-xs font-bold text-slate-900 dark:text-white">
-                Starter ($19)
-              </th>
-              <th className="py-3 px-4 text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                Professional ($49)
-              </th>
-              <th className="py-3 px-4 text-xs font-bold text-slate-900 dark:text-white">
-                Enterprise ($149)
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs">
-            <tr>
-              <td className="py-3 px-4 font-medium text-slate-700 dark:text-slate-300">
-                Team Member Seats
-              </td>
-              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">Up to 5</td>
-              <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200">
-                Up to 15
-              </td>
-              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">Unlimited</td>
-            </tr>
-            <tr>
-              <td className="py-3 px-4 font-medium text-slate-700 dark:text-slate-300">
-                Monthly API Requests
-              </td>
-              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">25,000</td>
-              <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200">
-                100,000
-              </td>
-              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">1,000,000+</td>
-            </tr>
-            <tr>
-              <td className="py-3 px-4 font-medium text-slate-700 dark:text-slate-300">
-                Cloud Storage
-              </td>
-              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">10 GB</td>
-              <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200">
-                50 GB
-              </td>
-              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">500 GB High Speed</td>
-            </tr>
-            <tr>
-              <td className="py-3 px-4 font-medium text-slate-700 dark:text-slate-300">
-                Role-Based Access Control (RBAC)
-              </td>
-              <td className="py-3 px-4 text-slate-400">—</td>
-              <td className="py-3 px-4 text-emerald-600 dark:text-emerald-400">
-                <Check className="w-4 h-4 inline" /> Included
-              </td>
-              <td className="py-3 px-4 text-emerald-600 dark:text-emerald-400">
-                <Check className="w-4 h-4 inline" /> Advanced Custom Roles
-              </td>
-            </tr>
-            <tr>
-              <td className="py-3 px-4 font-medium text-slate-700 dark:text-slate-300">
-                Support Level
-              </td>
-              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">Community / Email</td>
-              <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200">
-                Priority 24/7 SLA
-              </td>
-              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
-                Dedicated Concierge Manager
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      {activePlans.length > 0 && (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-8 mb-12 overflow-x-auto shadow-sm">
+          <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">
+            Detailed Feature Comparison
+          </h3>
+          <table className="w-full text-left border-collapse" style={{ minWidth: 220 + activePlans.length * 160 }}>
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-800">
+                <th className="py-3 px-4 text-xs font-semibold tracking-wide text-slate-400">
+                  Resource & Capability
+                </th>
+                {activePlans.map((plan) => (
+                  <th
+                    key={plan._id || plan.id}
+                    className={`py-3 px-4 text-xs font-bold ${
+                      plan.isFeatured || plan.popular
+                        ? 'text-brand-600 dark:text-brand-400'
+                        : 'text-slate-900 dark:text-white'
+                    }`}
+                  >
+                    {plan.name}
+                    <span className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      ${billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice}
+                      {billingCycle === 'yearly' ? ' / Year' : ' / Month'}
+                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs">
+              {specRows.map((row) => (
+                <tr key={row.label}>
+                  <td className="py-3 px-4 font-medium text-slate-700 dark:text-slate-300">{row.label}</td>
+                  {activePlans.map((plan) => (
+                    <td
+                      key={plan._id || plan.id}
+                      className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200"
+                    >
+                      {row.value(plan)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {featureRows.map((label) => (
+                <tr key={label.toLowerCase()}>
+                  <td className="py-3 px-4 font-medium text-slate-700 dark:text-slate-300">{label}</td>
+                  {activePlans.map((plan) => (
+                    <td key={plan._id || plan.id} className="py-3 px-4">
+                      {planHasFeature(plan, label) ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                          <Check className="w-4 h-4" /> Included
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 dark:text-slate-600">
+                          <X className="w-4 h-4" />
+                        </span>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* Confirmation Modal for Plan Change */}
       <Modal
         isOpen={confirmPlanModal.isOpen}
-        onClose={() => setConfirmPlanModal((prev) => ({ ...prev, isOpen: false }))}
-        title="Confirm Plan Change"
+        onClose={closeConfirm}
+        title={
+          confirmPlanModal.kind === 'buy'
+            ? 'Confirm Purchase'
+            : `Confirm ${kindLabel(confirmPlanModal.kind)}`
+        }
+        maxWidth="lg"
         footer={
           <>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setConfirmPlanModal((prev) => ({ ...prev, isOpen: false }))}
-            >
+            <Button variant="outline" size="sm" onClick={closeConfirm} disabled={isPurchasing}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" onClick={handleConfirmSwitch}>
-              Confirm Switch to {confirmPlanModal.planName}
+            <Button variant="primary" size="sm" onClick={handleConfirmSwitch} isLoading={isPurchasing}>
+              {confirmPlanModal.kind === 'buy'
+                ? `Pay $${confirmPlanModal.price} & Buy`
+                : `Confirm ${kindLabel(confirmPlanModal.kind)}`}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
+          {purchaseError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-xs text-rose-600 dark:text-rose-400">
+              {purchaseError}
+            </div>
+          )}
+
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            You are switching your subscription to the{' '}
-            <strong className="text-indigo-600 dark:text-indigo-400">
-              {confirmPlanModal.planName}
-            </strong>{' '}
-            plan at{' '}
+            {confirmPlanModal.kind === 'buy' ? 'You are buying the ' : 'You are switching to the '}
+            <strong className="text-brand-600 dark:text-brand-400">{confirmPlanModal.plan?.name}</strong> plan at{' '}
             <strong>
               ${confirmPlanModal.price}/{billingCycle === 'yearly' ? 'year' : 'month'}
             </strong>
             .
           </p>
+
           <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 text-xs text-slate-600 dark:text-slate-300 space-y-1">
             <p className="flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-200">
               <CheckCircle className="w-4 h-4 text-emerald-500" />
-              Instant Resource Quota Upgrade
+              Starts Immediately
             </p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Your new quotas will become active immediately and your payment method on file will be updated.
+              {hasActivePlan
+                ? `Your new plan is active as soon as you confirm. Your current ${currentSubscription?.planName || ''} plan is cancelled automatically and the change is saved in your billing history.`
+                : 'Your quotas become active as soon as the payment is confirmed.'}
             </p>
           </div>
+
+          {hasCard && defaultCard ? (
+            <div className="flex items-center gap-3 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700">
+              <CreditCard className="w-5 h-5 text-brand-600 dark:text-brand-400" />
+              <div className="text-xs">
+                <p className="font-semibold text-slate-800 dark:text-slate-200">
+                  {defaultCard.brand} Ending In {defaultCard.last4}
+                </p>
+                <p className="text-slate-500 dark:text-slate-400">
+                  Expires {String(defaultCard.expMonth).padStart(2, '0')}/{String(defaultCard.expYear).slice(-2)}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Add A Payment Card To Continue
+              </p>
+              <CardForm values={cardValues} errors={cardErrors} onChange={(v) => { setCardValues(v); setCardErrors({}); }} />
+            </div>
+          )}
         </div>
       </Modal>
     </div>

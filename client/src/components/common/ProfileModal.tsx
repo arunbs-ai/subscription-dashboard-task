@@ -5,8 +5,24 @@ import { Button } from './Button';
 import { Badge } from './Badge';
 import { useAppDispatch, useAppSelector } from '../../store';
 import { updateProfileThunk, changePasswordThunk } from '../../store/slices/authSlice';
-import { userApi, ApiError } from '../../services/api';
-import { User as UserIcon, Building, Phone, Mail, CheckCircle2, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { PhoneInput } from './PhoneInput';
+import {
+  COMPANY_MAX,
+  NAME_MAX,
+  PASSWORD_HINT,
+  PASSWORD_MAX,
+  formatPhone,
+  parsePhone,
+  sanitizeCompany,
+  sanitizeName,
+  sanitizePassword,
+  validateCompany,
+  validateEmail,
+  validateName,
+  validatePassword as validatePasswordRule,
+  validatePhone,
+} from '../../utils/validation';
+import { User as UserIcon, Building, Mail, CheckCircle2, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -19,36 +35,33 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
 
   const [activeTab, setActiveTab] = useState<'details' | 'security'>('details');
 
-  // Details state
   const [name, setName] = useState(user?.name || '');
   const [company, setCompany] = useState(user?.company || '');
-  const [phone, setPhone] = useState(user?.phone || '');
+  const [phone, setPhone] = useState(parsePhone(user?.phone).number);
+  const [phoneIso, setPhoneIso] = useState(parsePhone(user?.phone).iso);
   const [email, setEmail] = useState(user?.email || '');
 
-  // Password state
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [showCurrentPass, setShowCurrentPass] = useState(false);
   const [showNewPass, setShowNewPass] = useState(false);
 
-  // Errors & Feedback state
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Sync state when user changes
   useEffect(() => {
     if (user) {
       setName(user.name);
       setCompany(user.company || '');
-      setPhone(user.phone || '');
+      const parsed = parsePhone(user.phone);
+      setPhone(parsed.number);
+      setPhoneIso(parsed.iso);
       setEmail(user.email);
     }
     setErrors({});
     setSuccessMessage(null);
   }, [user, isOpen]);
 
-  // Generate Initials from Name
   const getInitials = (fullName: string) => {
     if (!fullName) return 'U';
     const parts = fullName.trim().split(/\s+/);
@@ -59,22 +72,17 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
   const validateDetails = (): boolean => {
     const errs: Record<string, string> = {};
 
-    if (!name.trim()) {
-      errs.name = 'Full Name is required.';
-    } else if (name.trim().length < 2) {
-      errs.name = 'Full Name must be at least 2 characters.';
-    }
+    const nameErr = validateName(name.trimEnd());
+    if (nameErr) errs.name = nameErr;
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email.trim()) {
-      errs.email = 'Email Address is required.';
-    } else if (!emailRegex.test(email.trim())) {
-      errs.email = 'Please enter a valid email address.';
-    }
+    const emailErr = validateEmail(email);
+    if (emailErr) errs.email = emailErr;
 
-    if (phone.trim() && !/^[+0-9()\s-]{7,20}$/.test(phone.trim())) {
-      errs.phone = 'Please enter a valid phone number.';
-    }
+    const companyErr = validateCompany(company.trimEnd());
+    if (companyErr) errs.company = companyErr;
+
+    const phoneErr = validatePhone(phoneIso, phone);
+    if (phoneErr) errs.phone = phoneErr;
 
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -87,18 +95,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
       errs.currentPassword = 'Current Password is required.';
     }
 
-    if (!newPassword) {
-      errs.newPassword = 'New Password is required.';
-    } else if (newPassword.length < 8) {
-      errs.newPassword = 'New Password must be at least 8 characters long.';
-    } else if (!/(?=.*[a-zA-Z])(?=.*[0-9])/.test(newPassword)) {
-      errs.newPassword = 'New Password must include both letters and numbers.';
-    }
-
-    if (!confirmPassword) {
-      errs.confirmPassword = 'Confirm New Password is required.';
-    } else if (newPassword !== confirmPassword) {
-      errs.confirmPassword = 'Passwords do not match.';
+    const newPassErr = validatePasswordRule(newPassword);
+    if (newPassErr) errs.newPassword = newPassErr;
+    else if (newPassword === currentPassword) {
+      errs.newPassword = 'New password must be different from the current password.';
     }
 
     setErrors(errs);
@@ -112,9 +112,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
     setErrors({});
     const result = await dispatch(
       updateProfileThunk({
-        name: name.trim(),
-        company: company.trim(),
-        phone: phone.trim(),
+        name: name.trimEnd(),
+        email: email.trim().toLowerCase(),
+        company: company.trimEnd(),
+        phone: formatPhone(phoneIso, phone),
       })
     );
 
@@ -137,7 +138,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
     if (changePasswordThunk.fulfilled.match(result)) {
       setCurrentPassword('');
       setNewPassword('');
-      setConfirmPassword('');
       setSuccessMessage('Password changed successfully!');
       setTimeout(() => { setSuccessMessage(null); onClose(); }, 1200);
     } else {
@@ -177,9 +177,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
       }
     >
       <div className="space-y-5">
-        {/* User Card Header - Displayed dynamically based on Name */}
         <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/60">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-bold text-lg flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-brand-600 to-brand-600 text-white font-bold text-lg flex items-center justify-center shadow-md shadow-brand-500/20 shrink-0">
             {getInitials(name || user?.name || '')}
           </div>
           <div className="flex-1 min-w-0">
@@ -200,7 +199,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
           </div>
         </div>
 
-        {/* Tab Selection */}
         <div className="flex border-b border-slate-200 dark:border-slate-800">
           <button
             type="button"
@@ -210,7 +208,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             }}
             className={`pb-2.5 px-4 text-xs font-semibold border-b-2 transition-colors ${
               activeTab === 'details'
-                ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+                ? 'border-brand-600 text-brand-600 dark:border-brand-400 dark:text-brand-400'
                 : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
             }`}
           >
@@ -224,7 +222,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
             }}
             className={`pb-2.5 px-4 text-xs font-semibold border-b-2 transition-colors ${
               activeTab === 'security'
-                ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+                ? 'border-brand-600 text-brand-600 dark:border-brand-400 dark:text-brand-400'
                 : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
             }`}
           >
@@ -233,13 +231,14 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
         </div>
 
         {activeTab === 'details' ? (
-          <form className="space-y-4" onSubmit={handleSaveDetails}>
+          <form className="space-y-4" onSubmit={handleSaveDetails} noValidate>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
-                label="Full Name"
+                label="First Name"
+                maxLength={NAME_MAX}
                 value={name}
                 onChange={(e) => {
-                  setName(e.target.value);
+                  setName(sanitizeName(e.target.value));
                   if (errors.name) setErrors((prev) => ({ ...prev, name: '' }));
                 }}
                 error={errors.name}
@@ -263,25 +262,31 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
               <Input
                 label="Company Name"
                 value={company}
-                onChange={(e) => setCompany(e.target.value)}
+                maxLength={COMPANY_MAX}
+                error={errors.company}
+                onChange={(e) => {
+                  setCompany(sanitizeCompany(e.target.value));
+                  if (errors.company) setErrors((prev) => ({ ...prev, company: '' }));
+                }}
                 leftIcon={<Building className="w-4 h-4" />}
                 placeholder="Acme Corp"
               />
-              <Input
+              <PhoneInput
+                id="profile-phone"
                 label="Phone Number"
-                value={phone}
-                onChange={(e) => {
-                  setPhone(e.target.value);
+                countryIso={phoneIso}
+                number={phone}
+                onChange={(iso, num) => {
+                  setPhoneIso(iso);
+                  setPhone(num);
                   if (errors.phone) setErrors((prev) => ({ ...prev, phone: '' }));
                 }}
                 error={errors.phone}
-                leftIcon={<Phone className="w-4 h-4" />}
-                placeholder="+1 (555) 000-0000"
               />
             </div>
           </form>
         ) : (
-          <form className="space-y-4" onSubmit={handleSavePassword}>
+          <form className="space-y-4" onSubmit={handleSavePassword} noValidate>
             <div className="relative">
               <Input
                 label="Current Password"
@@ -307,14 +312,15 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
               <Input
                 label="New Password"
                 type={showNewPass ? 'text' : 'password'}
-                placeholder="Minimum 8 characters"
+                placeholder="8-20 characters"
+                maxLength={PASSWORD_MAX}
                 value={newPassword}
                 onChange={(e) => {
-                  setNewPassword(e.target.value);
+                  setNewPassword(sanitizePassword(e.target.value));
                   if (errors.newPassword) setErrors((prev) => ({ ...prev, newPassword: '' }));
                 }}
                 error={errors.newPassword}
@@ -330,23 +336,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ isOpen, onClose }) =
                 }
                 required
               />
-              <Input
-                label="Confirm New Password"
-                type="password"
-                placeholder="Re-enter new password"
-                value={confirmPassword}
-                onChange={(e) => {
-                  setConfirmPassword(e.target.value);
-                  if (errors.confirmPassword) setErrors((prev) => ({ ...prev, confirmPassword: '' }));
-                }}
-                error={errors.confirmPassword}
-                leftIcon={<Lock className="w-4 h-4" />}
-                required
-              />
             </div>
 
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Password must be at least 8 characters and include a mixture of letters and numbers.
+              {PASSWORD_HINT}
             </p>
           </form>
         )}

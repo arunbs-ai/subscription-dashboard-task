@@ -60,7 +60,7 @@ export const Badge: React.FC<BadgeProps> = ({
       'bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/60',
     rose: 'bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/60',
     indigo:
-      'bg-indigo-50 text-indigo-700 border-indigo-200/80 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800/60',
+      'bg-brand-50 text-brand-700 border-brand-200/80 dark:bg-brand-950/40 dark:text-brand-300 dark:border-brand-800/60',
     slate:
       'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/70 dark:text-slate-300 dark:border-slate-700',
   };
@@ -70,7 +70,7 @@ export const Badge: React.FC<BadgeProps> = ({
     sky: 'bg-sky-500',
     amber: 'bg-amber-500',
     rose: 'bg-rose-500',
-    indigo: 'bg-indigo-500',
+    indigo: 'bg-brand-500',
     slate: 'bg-slate-400',
   };
 

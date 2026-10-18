@@ -33,7 +33,6 @@ const initialState: AdminState = {
   notificationMessage: null,
 };
 
-// ─── Async Thunk: Fetch Subscribers from Backend ──────────────────────────────
 export const fetchAdminSubscriptionsThunk = createAsyncThunk(
   'admin/fetchSubscriptions',
   async (_, { rejectWithValue }) => {

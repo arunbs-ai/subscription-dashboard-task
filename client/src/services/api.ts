@@ -1,26 +1,23 @@
-/**
- * Centralized API service layer for SubPulse frontend.
- * All requests go through this module — handles base URL, auth headers,
- * token refresh on 401, and consistent error extraction.
- */
+import { env } from '../config/env';
 
-const BASE_URL = 'http://localhost:3002/api';
+const BASE_URL = env.apiBaseUrl;
 
-// ─── Token Storage ────────────────────────────────────────────────────────────
+const ACCESS_KEY = `${env.storagePrefix}_access_token`;
+const REFRESH_KEY = `${env.storagePrefix}_refresh_token`;
+
 export const TokenStorage = {
-  getAccess: () => localStorage.getItem('subpulse_access_token'),
-  getRefresh: () => localStorage.getItem('subpulse_refresh_token'),
+  getAccess: () => localStorage.getItem(ACCESS_KEY),
+  getRefresh: () => localStorage.getItem(REFRESH_KEY),
   set: (access: string, refresh: string) => {
-    localStorage.setItem('subpulse_access_token', access);
-    localStorage.setItem('subpulse_refresh_token', refresh);
+    localStorage.setItem(ACCESS_KEY, access);
+    localStorage.setItem(REFRESH_KEY, refresh);
   },
   clear: () => {
-    localStorage.removeItem('subpulse_access_token');
-    localStorage.removeItem('subpulse_refresh_token');
+    localStorage.removeItem(ACCESS_KEY);
+    localStorage.removeItem(REFRESH_KEY);
   },
 };
 
-// ─── Core Request Helper ──────────────────────────────────────────────────────
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -41,11 +38,9 @@ async function request<T>(
     headers,
   });
 
-  // If 401 and we have a refresh token, try to refresh
   if (response.status === 401 && withAuth) {
     const refreshed = await tryRefreshToken();
     if (refreshed) {
-      // Retry original request with new token
       headers['Authorization'] = `Bearer ${TokenStorage.getAccess()}`;
       const retried = await fetch(`${BASE_URL}${endpoint}`, {
         ...options,
@@ -56,7 +51,6 @@ async function request<T>(
       return retryData as T;
     } else {
       TokenStorage.clear();
-      window.location.href = '/login';
       throw new ApiError('Session expired. Please sign in again.', 401);
     }
   }
@@ -97,7 +91,6 @@ export class ApiError extends Error {
   }
 }
 
-// ─── Auth API ─────────────────────────────────────────────────────────────────
 export const authApi = {
   login: (email: string, password: string) =>
     request<any>('/auth/login', {
@@ -124,12 +117,11 @@ export const authApi = {
     request<any>('/auth/me', {}, true),
 };
 
-// ─── User/Profile API ─────────────────────────────────────────────────────────
 export const userApi = {
   getProfile: () =>
     request<any>('/user/profile', {}, true),
 
-  updateProfile: (data: { name?: string; company?: string; phone?: string }) =>
+  updateProfile: (data: { name?: string; email?: string; company?: string; phone?: string }) =>
     request<any>('/user/profile', {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -145,12 +137,10 @@ export const userApi = {
     request<any>('/user/all', {}, true),
 };
 
-// ─── Plans API ────────────────────────────────────────────────────────────────
 export const plansApi = {
   getActivePlans: () =>
     request<any>('/plans'),
 
-  // Admin endpoints
   admin: {
     getAll: (includeDeleted = false) =>
       request<any>(`/plans/admin?includeDeleted=${includeDeleted}`, {}, true),
@@ -192,7 +182,6 @@ export const plansApi = {
   },
 };
 
-// ─── Subscriptions API ────────────────────────────────────────────────────────
 export const subscriptionApi = {
   getMy: () =>
     request<any>('/subscriptions/my', {}, true),
@@ -215,10 +204,14 @@ export const subscriptionApi = {
       body: JSON.stringify(data),
     }, true),
 
-  cancel: () =>
+  cancel: (data: { immediately?: boolean; reason?: string; subscriptionId?: string } = {}) =>
     request<any>('/subscriptions/cancel', {
       method: 'POST',
+      body: JSON.stringify(data),
     }, true),
+
+  getHistory: () =>
+    request<any>('/subscriptions/history', {}, true),
 
   reactivate: () =>
     request<any>('/subscriptions/reactivate', {
@@ -229,7 +222,6 @@ export const subscriptionApi = {
     request<any>('/subscriptions/admin/subscribers', {}, true),
 };
 
-// ─── Payment Cards API ────────────────────────────────────────────────────────
 export const cardApi = {
   getMyCards: () =>
     request<any>('/cards/my', {}, true),

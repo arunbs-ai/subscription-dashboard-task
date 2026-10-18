@@ -7,10 +7,11 @@ import { Subscription } from '../models/Subscription.js';
 import { PlanAuditLog } from '../models/PlanAuditLog.js';
 import { config } from '../config/config.js';
 
-// ─── Default Plans Data ───────────────────────────────────────────────────────
 const DEFAULT_PLANS = [
   {
     name: 'Starter',
+    tier: 'starter',
+    apiRequests: 25000,
     description: 'Perfect for individuals and small teams just getting started.',
     monthlyPrice: 9,
     yearlyPrice: 90,
@@ -36,6 +37,8 @@ const DEFAULT_PLANS = [
   },
   {
     name: 'Professional',
+    tier: 'pro',
+    apiRequests: 100000,
     description: 'Ideal for growing teams who need more power and flexibility.',
     monthlyPrice: 29,
     yearlyPrice: 290,
@@ -61,6 +64,8 @@ const DEFAULT_PLANS = [
   },
   {
     name: 'Enterprise',
+    tier: 'enterprise',
+    apiRequests: 1000000,
     description: 'For large organizations requiring unlimited scale and dedicated support.',
     monthlyPrice: 99,
     yearlyPrice: 990,
@@ -86,17 +91,15 @@ const DEFAULT_PLANS = [
   },
 ];
 
-// ─── Seeder ───────────────────────────────────────────────────────────────────
 export const seedRolesAndAdmin = async (): Promise<void> => {
   try {
-    // 1. Seed Roles ('admin' and 'user')
     let adminRole = await Role.findOne({ name: 'admin' });
     if (!adminRole) {
       adminRole = await Role.create({
         name: 'admin',
         description: 'Administrator with full system and subscription management privileges',
       });
-      console.log('✅ [SEED] Created Role: admin');
+      console.log('[SEED] Created Role: admin');
     }
 
     let userRole = await Role.findOne({ name: 'user' });
@@ -105,37 +108,38 @@ export const seedRolesAndAdmin = async (): Promise<void> => {
         name: 'user',
         description: 'Standard subscriber and workspace member',
       });
-      console.log('✅ [SEED] Created Role: user');
+      console.log('[SEED] Created Role: user');
     }
 
-    // 2. Seed Default Admin Account
     const existingAdmin = await User.findOne({ email: config.adminSeed.email.toLowerCase() });
     if (!existingAdmin) {
       const adminUser = new User({
         name: config.adminSeed.name,
         email: config.adminSeed.email.toLowerCase(),
-        password: config.adminSeed.password, // Pre-save hook hashes with bcrypt
+        password: config.adminSeed.password, 
         role: adminRole._id,
         company: config.adminSeed.company,
         phone: '+1 (555) 999-0000',
       });
 
       await adminUser.save();
-      console.log(`✅ [SEED] Initial Admin account created:`);
+      console.log(`[SEED] Initial Admin account created:`);
       console.log(`   Email: ${config.adminSeed.email}`);
       console.log(`   Password: ${config.adminSeed.password}`);
       console.log(`   Role ID: ${adminRole._id}`);
     } else {
-      console.log(`ℹ️ [SEED] Admin account already present (${config.adminSeed.email})`);
+      console.log(`[SEED] Admin account already present (${config.adminSeed.email})`);
     }
 
-    // 3. Seed Default Plans & Features in separate collection
     const adminUser = await User.findOne({ email: config.adminSeed.email.toLowerCase() });
     for (const planData of DEFAULT_PLANS) {
+      await Plan.updateOne(
+        { name: planData.name, tier: { $exists: false } },
+        { $set: { tier: (planData as any).tier, apiRequests: (planData as any).apiRequests } }
+      );
       let plan = await Plan.findOne({ name: planData.name });
       if (!plan) {
         plan = await Plan.create(planData);
-        // Write audit log entry to separate collection
         await PlanAuditLog.create({
           planId: plan._id,
           planName: plan.name,
@@ -147,10 +151,9 @@ export const seedRolesAndAdmin = async (): Promise<void> => {
           note: 'Initial plan seeded by system.',
           timestamp: new Date(),
         });
-        console.log(`✅ [SEED] Created Plan: ${planData.name} ($${planData.monthlyPrice}/mo)`);
+        console.log(`[SEED] Created Plan: ${planData.name} ($${planData.monthlyPrice}/mo)`);
       }
 
-      // Ensure features are stored in separate PLAN_FEATURES collection
       const existingFeaturesCount = await PlanFeature.countDocuments({ planId: plan._id });
       if (existingFeaturesCount === 0 && planData.features) {
         const featureDocs = planData.features.map((f, idx) => ({
@@ -160,11 +163,10 @@ export const seedRolesAndAdmin = async (): Promise<void> => {
           order: idx,
         }));
         await PlanFeature.insertMany(featureDocs);
-        console.log(`✅ [SEED] Seeded ${featureDocs.length} features into PLAN_FEATURES for: ${plan.name}`);
+        console.log(`[SEED] Seeded ${featureDocs.length} features into PLAN_FEATURES for: ${plan.name}`);
       }
     }
 
-    // 4. Seed Default Regular User & Active Subscription
     let regularUser = await User.findOne({ email: 'user@subpulse.io' });
     if (!regularUser) {
       regularUser = new User({
@@ -176,10 +178,9 @@ export const seedRolesAndAdmin = async (): Promise<void> => {
         phone: '+1 (555) 234-5678',
       });
       await regularUser.save();
-      console.log('✅ [SEED] Created Demo User: user@subpulse.io (password: User@12345)');
+      console.log('[SEED] Created Demo User: user@subpulse.io (password: User@12345)');
     }
 
-    // Seed default payment card for user
     let defaultCard = await UserCard.findOne({ userId: regularUser._id });
     if (!defaultCard) {
       defaultCard = await UserCard.create({
@@ -191,10 +192,9 @@ export const seedRolesAndAdmin = async (): Promise<void> => {
         expYear: 2028,
         isDefault: true,
       });
-      console.log('✅ [SEED] Created default Visa card for user@subpulse.io');
+      console.log('[SEED] Created default Visa card for user@subpulse.io');
     }
 
-    // Seed active subscription on 'Professional' plan if none exists
     const existingSub = await Subscription.findOne({ userId: regularUser._id });
     if (!existingSub) {
       const proPlan = await Plan.findOne({ name: 'Professional' });
@@ -214,10 +214,10 @@ export const seedRolesAndAdmin = async (): Promise<void> => {
           endDate,
           cancelAtPeriodEnd: false,
         });
-        console.log('✅ [SEED] Created active subscription on Professional plan for user@subpulse.io');
+        console.log('[SEED] Created active subscription on Professional plan for user@subpulse.io');
       }
     }
   } catch (error) {
-    console.error('❌ [SEED] Error during database seeding:', error);
+    console.error('[SEED] Error during database seeding:', error);
   }
 };

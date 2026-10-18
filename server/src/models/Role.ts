@@ -12,22 +12,10 @@ export interface IRole extends Document {
 
 const roleSchema = new Schema<IRole>(
   {
-    name: {
-      type: String,
-      required: true,
-      unique: true,
-      enum: ['admin', 'user'],
-      lowercase: true,
-      trim: true,
-    },
-    description: {
-      type: String,
-      default: '',
-    },
+    name: { type: String, required: true, unique: true, enum: ['admin', 'user'], lowercase: true, trim: true },
+    description: { type: String, default: '' },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 export const Role = model<IRole>('ROLE', roleSchema, 'ROLE');

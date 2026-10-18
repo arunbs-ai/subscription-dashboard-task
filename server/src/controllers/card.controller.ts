@@ -3,7 +3,6 @@ import { UserCard } from '../models/UserCard.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 
 export class CardController {
-  // ─── Get User's Cards ─────────────────────────────────────────────────────────
   static async getMyCards(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const cards = await UserCard.find({ userId: req.user!._id }).sort({ isDefault: -1, createdAt: -1 });
@@ -13,13 +12,25 @@ export class CardController {
     }
   }
 
-  // ─── Add New Card ─────────────────────────────────────────────────────────────
   static async addCard(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { holderName, brand, cardNumber, last4, expMonth, expYear, isDefault } = req.body;
       const userId = req.user!._id;
 
-      const finalLast4 = cardNumber ? cardNumber.replace(/\s+/g, '').slice(-4) : (last4 || '4242');
+      const finalLast4 = cardNumber ? cardNumber.replace(/\s+/g, '').slice(-4) : last4;
+      const m = Number(expMonth);
+      const y = Number(expYear);
+      const now = new Date();
+      if (
+        !holderName?.trim() ||
+        !/^\d{4}$/.test(String(finalLast4 || '')) ||
+        !(m >= 1 && m <= 12) ||
+        y < now.getFullYear() ||
+        (y === now.getFullYear() && m < now.getMonth() + 1)
+      ) {
+        res.status(400).json({ success: false, message: 'Please provide valid card details.' });
+        return;
+      }
 
       const existingCardsCount = await UserCard.countDocuments({ userId });
       const makeDefault = isDefault || existingCardsCount === 0;
@@ -44,7 +55,6 @@ export class CardController {
     }
   }
 
-  // ─── Set Default Card ─────────────────────────────────────────────────────────
   static async setDefaultCard(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!._id;
@@ -64,7 +74,6 @@ export class CardController {
     }
   }
 
-  // ─── Delete Card ──────────────────────────────────────────────────────────────
   static async deleteCard(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!._id;
@@ -74,7 +83,6 @@ export class CardController {
         return;
       }
 
-      // If deleted card was default, set another card as default if available
       if (card.isDefault) {
         const nextCard = await UserCard.findOne({ userId });
         if (nextCard) {

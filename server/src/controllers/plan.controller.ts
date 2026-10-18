@@ -5,7 +5,6 @@ import { PlanAuditLog } from '../models/PlanAuditLog.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 import { Types } from 'mongoose';
 
-// ─── Helper: Build field-level diff ──────────────────────────────────────────
 const buildChanges = (
   original: Record<string, unknown>,
   updates: Record<string, unknown>
@@ -21,7 +20,6 @@ const buildChanges = (
   return changes;
 };
 
-// ─── Helper: Write audit log entry ───────────────────────────────────────────
 const writeAudit = async (
   plan: IPlan,
   action: 'created' | 'updated' | 'deleted' | 'restored',
@@ -42,7 +40,6 @@ const writeAudit = async (
   });
 };
 
-// ─── Helper: Attach features from separate PlanFeature table ──────────────────
 const attachFeatures = async (plans: any[]) => {
   if (!plans || plans.length === 0) return [];
   const planIds = plans.map((p) => p._id);
@@ -64,7 +61,6 @@ const attachFeatures = async (plans: any[]) => {
       if (matchingFeatures.length > 0) {
         pObj.features = matchingFeatures;
       } else if (pObj.features && pObj.features.length > 0) {
-        // Auto-migrate legacy features to separate PLAN_FEATURES collection
         const newFeatures = pObj.features.map((f: any, idx: number) => ({
           planId: p._id,
           label: typeof f === 'string' ? f : f.label,
@@ -98,7 +94,6 @@ const syncPlanFeatures = async (planId: Types.ObjectId, features?: any[]) => {
 };
 
 export class PlanController {
-  // ─── PUBLIC: Get All Active Plans ─────────────────────────────────────────
   static async getActivePlans(_req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const rawPlans = await Plan.find({ isActive: true, isDeleted: false })
@@ -110,7 +105,6 @@ export class PlanController {
     }
   }
 
-  // ─── ADMIN: Get All Plans ─────────────────────────────────────────────────
   static async getAllPlans(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { includeDeleted } = req.query;
@@ -124,7 +118,6 @@ export class PlanController {
     }
   }
 
-  // ─── ADMIN: Get Single Plan by ID ─────────────────────────────────────────
   static async getPlanById(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const plan = await Plan.findById(req.params.id);
@@ -139,7 +132,6 @@ export class PlanController {
     }
   }
 
-  // ─── ADMIN: Create Plan ───────────────────────────────────────────────────
   static async createPlan(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { note, features, ...planData } = req.body;
@@ -147,7 +139,6 @@ export class PlanController {
 
       const plan = await Plan.create(planData);
 
-      // Store features in separate PLAN_FEATURES collection mapped by planId
       if (features) {
         await syncPlanFeatures(plan._id, features);
       }
@@ -166,7 +157,6 @@ export class PlanController {
     }
   }
 
-  // ─── ADMIN: Update Plan ───────────────────────────────────────────────────
   static async updatePlan(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const plan = await Plan.findById(req.params.id);
@@ -178,13 +168,11 @@ export class PlanController {
       const { note, features, ...updates } = req.body;
       const actor = req.user!;
 
-      // Build diff before applying updates
       const changes = buildChanges(plan.toObject() as unknown as Record<string, unknown>, updates);
 
       Object.assign(plan, updates);
       await plan.save();
 
-      // Sync features in separate PLAN_FEATURES collection
       if (features !== undefined) {
         await syncPlanFeatures(plan._id, features);
       }
@@ -203,7 +191,6 @@ export class PlanController {
     }
   }
 
-  // ─── ADMIN: Soft Delete Plan ──────────────────────────────────────────────
   static async deletePlan(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const plan = await Plan.findById(req.params.id);
@@ -232,7 +219,6 @@ export class PlanController {
     }
   }
 
-  // ─── ADMIN: Restore Soft-Deleted Plan ────────────────────────────────────
   static async restorePlan(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const plan = await Plan.findById(req.params.id);
@@ -260,7 +246,6 @@ export class PlanController {
     }
   }
 
-  // ─── ADMIN: Toggle Active ─────────────────────────────────────────────────
   static async toggleActive(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const plan = await Plan.findById(req.params.id);
@@ -288,7 +273,6 @@ export class PlanController {
     }
   }
 
-  // ─── ADMIN: Get Audit History for a Plan ─────────────────────────────────
   static async getPlanAuditHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const plan = await Plan.findById(req.params.id).select('name');

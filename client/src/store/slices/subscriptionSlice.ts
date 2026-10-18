@@ -7,9 +7,9 @@ import {
   Invoice,
   AdminSubscriptionRecord,
   AdminMetrics,
+  SubscriptionHistoryItem,
 } from '../../types';
 import { subscriptionApi, cardApi, ApiError } from '../../services/api';
-import { mockUserSubscription } from '../../data/mockData';
 
 interface SubscriptionState {
   currentSubscription: UserSubscription | null;
@@ -22,6 +22,7 @@ interface SubscriptionState {
   } | null;
   invoices: Invoice[];
   cards: UserCard[];
+  history: SubscriptionHistoryItem[];
   adminSubscribers: AdminSubscriptionRecord[];
   adminMetrics: AdminMetrics | null;
   isLoading: boolean;
@@ -30,11 +31,12 @@ interface SubscriptionState {
 }
 
 const initialState: SubscriptionState = {
-  currentSubscription: mockUserSubscription,
+  currentSubscription: null,
   scheduledSubscription: null,
-  usage: mockUserSubscription.usage,
-  invoices: mockUserSubscription.invoices,
+  usage: null,
+  invoices: [],
   cards: [],
+  history: [],
   adminSubscribers: [],
   adminMetrics: null,
   isLoading: false,
@@ -42,7 +44,6 @@ const initialState: SubscriptionState = {
   actionSuccessMessage: null,
 };
 
-// ─── Async Thunks ─────────────────────────────────────────────────────────────
 export const fetchMySubscription = createAsyncThunk(
   'subscription/fetchMy',
   async (_, { rejectWithValue }) => {
@@ -75,8 +76,8 @@ export const purchaseSubscriptionThunk = createAsyncThunk(
   ) => {
     try {
       const res = await subscriptionApi.purchase(payload);
-      // Re-fetch fresh state after purchase
       dispatch(fetchMySubscription());
+      dispatch(fetchSubscriptionHistory());
       return res;
     } catch (err: any) {
       return rejectWithValue(err instanceof ApiError ? err.message : 'Purchase failed');
@@ -84,13 +85,28 @@ export const purchaseSubscriptionThunk = createAsyncThunk(
   }
 );
 
+export const fetchSubscriptionHistory = createAsyncThunk(
+  'subscription/fetchHistory',
+  async (_, { rejectWithValue }) => {
+    try {
+      const res = await subscriptionApi.getHistory();
+      return res.data.history as SubscriptionHistoryItem[];
+    } catch (err: any) {
+      return rejectWithValue(err instanceof ApiError ? err.message : 'Failed to load subscription history');
+    }
+  }
+);
+
 export const cancelSubscriptionThunk = createAsyncThunk(
   'subscription/cancel',
-  async (_, { rejectWithValue, dispatch }) => {
+  async (
+    payload: { immediately?: boolean; reason?: string; subscriptionId?: string } | undefined,
+    { rejectWithValue, dispatch }
+  ) => {
     try {
-      const res = await subscriptionApi.cancel();
-      dispatch(fetchMySubscription());
-      return res.message;
+      const res = await subscriptionApi.cancel(payload || {});
+      await Promise.all([dispatch(fetchMySubscription()), dispatch(fetchSubscriptionHistory())]);
+      return res.message as string;
     } catch (err: any) {
       return rejectWithValue(err instanceof ApiError ? err.message : 'Failed to cancel subscription');
     }
@@ -103,6 +119,7 @@ export const reactivateSubscriptionThunk = createAsyncThunk(
     try {
       const res = await subscriptionApi.reactivate();
       dispatch(fetchMySubscription());
+      dispatch(fetchSubscriptionHistory());
       return res.message;
     } catch (err: any) {
       return rejectWithValue(err instanceof ApiError ? err.message : 'Failed to reactivate subscription');
@@ -134,7 +151,48 @@ export const fetchUserCards = createAsyncThunk(
   }
 );
 
-// ─── Slice ────────────────────────────────────────────────────────────────────
+export const addCardThunk = createAsyncThunk(
+  'subscription/addCard',
+  async (
+    data: { holderName: string; brand?: string; last4: string; expMonth: number; expYear: number },
+    { rejectWithValue, dispatch }
+  ) => {
+    try {
+      const res = await cardApi.addCard(data);
+      dispatch(fetchUserCards());
+      return res.message as string;
+    } catch (err: any) {
+      return rejectWithValue(err instanceof ApiError ? err.message : 'Failed to add card');
+    }
+  }
+);
+
+export const setDefaultCardThunk = createAsyncThunk(
+  'subscription/setDefaultCard',
+  async (cardId: string, { rejectWithValue, dispatch }) => {
+    try {
+      await cardApi.setDefault(cardId);
+      dispatch(fetchUserCards());
+      return 'Default card updated.';
+    } catch (err: any) {
+      return rejectWithValue(err instanceof ApiError ? err.message : 'Failed to update default card');
+    }
+  }
+);
+
+export const deleteCardThunk = createAsyncThunk(
+  'subscription/deleteCard',
+  async (cardId: string, { rejectWithValue, dispatch }) => {
+    try {
+      await cardApi.deleteCard(cardId);
+      dispatch(fetchUserCards());
+      return 'Card removed.';
+    } catch (err: any) {
+      return rejectWithValue(err instanceof ApiError ? err.message : 'Failed to remove card');
+    }
+  }
+);
+
 export const subscriptionSlice = createSlice({
   name: 'subscription',
   initialState,
@@ -143,7 +201,6 @@ export const subscriptionSlice = createSlice({
       state.actionSuccessMessage = null;
       state.error = null;
     },
-    // Backwards-compatible synchronous action
     cancelSubscription: (state) => {
       if (state.currentSubscription) {
         state.currentSubscription.cancelAtPeriodEnd = true;
@@ -173,7 +230,6 @@ export const subscriptionSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
-    // fetchMySubscription
     builder
       .addCase(fetchMySubscription.pending, (state) => {
         state.isLoading = true;
@@ -202,14 +258,14 @@ export const subscriptionSlice = createSlice({
             cancelAtPeriodEnd: activeSubscription.cancelAtPeriodEnd,
             plan: plan,
             cardId: activeSubscription.cardId,
-            paymentMethod: activeSubscription.cardId
+            paymentMethod: activeSubscription.cardId?.last4
               ? {
-                  brand: activeSubscription.cardId.brand || 'Visa',
-                  last4: activeSubscription.cardId.last4 || '4242',
-                  expMonth: activeSubscription.cardId.expMonth || 12,
-                  expYear: activeSubscription.cardId.expYear || 2028,
+                  brand: activeSubscription.cardId.brand || 'Card',
+                  last4: activeSubscription.cardId.last4,
+                  expMonth: activeSubscription.cardId.expMonth,
+                  expYear: activeSubscription.cardId.expYear,
                 }
-              : { brand: 'Visa', last4: '4242', expMonth: 12, expYear: 2028 },
+              : null,
             usage: usage || state.usage,
             invoices: invoices || [],
           };
@@ -234,7 +290,6 @@ export const subscriptionSlice = createSlice({
         state.error = action.payload as string;
       });
 
-    // purchaseSubscriptionThunk
     builder
       .addCase(purchaseSubscriptionThunk.pending, (state) => {
         state.isLoading = true;
@@ -249,19 +304,14 @@ export const subscriptionSlice = createSlice({
         state.error = action.payload as string;
       });
 
-    // cancelSubscriptionThunk
     builder
       .addCase(cancelSubscriptionThunk.fulfilled, (state, action) => {
-        if (state.currentSubscription) {
-          state.currentSubscription.cancelAtPeriodEnd = true;
-        }
         state.actionSuccessMessage = action.payload;
       })
       .addCase(cancelSubscriptionThunk.rejected, (state, action) => {
         state.error = action.payload as string;
       });
 
-    // reactivateSubscriptionThunk
     builder
       .addCase(reactivateSubscriptionThunk.fulfilled, (state, action) => {
         if (state.currentSubscription) {
@@ -273,7 +323,6 @@ export const subscriptionSlice = createSlice({
         state.error = action.payload as string;
       });
 
-    // fetchAdminSubscribers
     builder
       .addCase(fetchAdminSubscribers.pending, (state) => {
         state.isLoading = true;
@@ -289,11 +338,34 @@ export const subscriptionSlice = createSlice({
         state.error = action.payload as string;
       });
 
-    // fetchUserCards
+    builder.addCase(fetchSubscriptionHistory.fulfilled, (state, action) => {
+      state.history = action.payload;
+    });
+
+    builder.addCase(addCardThunk.fulfilled, (state, action) => {
+      state.actionSuccessMessage = action.payload || 'Card added successfully.';
+    });
+
+    builder
+      .addCase(setDefaultCardThunk.fulfilled, (state, action) => {
+        state.actionSuccessMessage = action.payload;
+      })
+      .addCase(deleteCardThunk.fulfilled, (state, action) => {
+        state.actionSuccessMessage = action.payload;
+      })
+      .addCase(deleteCardThunk.rejected, (state, action) => {
+        state.error = action.payload as string;
+      });
+
     builder
       .addCase(fetchUserCards.fulfilled, (state, action) => {
         state.cards = action.payload;
       });
+
+    builder.addMatcher(
+      (action) => action.type === 'auth/logout/fulfilled' || action.type === 'auth/logout',
+      () => initialState
+    );
   },
 });
 

@@ -15,18 +15,24 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   disallowedRole,
 }) => {
   const location = useLocation();
-  const { isAuthenticated, role } = useAppSelector((state) => state.auth);
+  const { isAuthenticated, isInitializing, role } = useAppSelector((state) => state.auth);
+
+  if (isInitializing) {
+    return (
+      <div className="py-24 flex items-center justify-center text-sm text-slate-400">
+        Loading your session...
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // If role is explicitly disallowed for this route (e.g. admin cannot access /dashboard)
   if (disallowedRole && role === disallowedRole) {
     return <Navigate to="/admin/subscriptions" replace />;
   }
 
-  // If route requires a specific role (e.g. admin for /admin/subscriptions)
   if (requiredRole && role !== requiredRole) {
     return <Navigate to="/dashboard" replace />;
   }

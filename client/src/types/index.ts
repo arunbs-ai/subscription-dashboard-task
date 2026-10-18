@@ -4,7 +4,6 @@ export type SubscriptionStatus = 'active' | 'trialing' | 'past_due' | 'cancelled
 
 export type BillingCycle = 'monthly' | 'yearly';
 
-// ─── User ─────────────────────────────────────────────────────────────────────
 export interface User {
   id: string;
   name: string;
@@ -16,7 +15,6 @@ export interface User {
   createdAt: string;
 }
 
-// ─── Plan ─────────────────────────────────────────────────────────────────────
 export type PlanFeature =
   | string
   | {
@@ -33,7 +31,7 @@ export interface PlanLimits {
 
 export interface Plan {
   _id?: string;
-  id?: string; // alias
+  id?: string; 
   name: string;
   tier?: 'starter' | 'pro' | 'enterprise' | string;
   description: string;
@@ -42,6 +40,7 @@ export interface Plan {
   currency?: string;
   billingCycle?: 'monthly' | 'yearly' | 'both';
   features: PlanFeature[];
+  apiRequests?: number;
   maxUsers?: number;
   maxProjects?: number;
   storageGB?: number;
@@ -57,7 +56,6 @@ export interface Plan {
   updatedAt?: string;
 }
 
-// ─── Plan Audit ───────────────────────────────────────────────────────────────
 export interface PlanAuditLog {
   _id: string;
   planId: string;
@@ -73,7 +71,6 @@ export interface PlanAuditLog {
 
 export type ScheduleType = 'start_now' | 'after_current_plan';
 
-// ─── User Card ────────────────────────────────────────────────────────────────
 export interface UserCard {
   _id: string;
   id?: string;
@@ -87,7 +84,6 @@ export interface UserCard {
   createdAt?: string;
 }
 
-// ─── Invoice ──────────────────────────────────────────────────────────────────
 export interface Invoice {
   id: string;
   date: string;
@@ -95,9 +91,13 @@ export interface Invoice {
   currency: string;
   status: 'paid' | 'open' | 'failed';
   pdfUrl?: string;
+  description?: string;
+  changeType?: 'new' | 'upgrade' | 'downgrade';
+  planName?: string;
+  billingCycle?: BillingCycle;
+  subscriptionStatus?: string;
 }
 
-// ─── User Subscription ────────────────────────────────────────────────────────
 export interface UserSubscription {
   _id?: string;
   id?: string;
@@ -110,30 +110,29 @@ export interface UserSubscription {
   price: number;
   startDate?: string;
   endDate?: string;
-  currentPeriodStart?: string;
-  currentPeriodEnd?: string;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
   cancelAtPeriodEnd: boolean;
   cardId?: UserCard | any;
   plan?: Plan;
-  paymentMethod?: {
+  paymentMethod: {
     brand: string;
     last4: string;
     expMonth: number;
     expYear: number;
-  };
-  usage?: {
+  } | null;
+  usage: {
     teamMembers: { used: number; limit: number };
     storageGB: { used: number; limit: number };
     projects: { used: number; limit: number };
     apiRequests?: { used: number; limit: number };
   };
-  invoices?: Invoice[];
+  invoices: Invoice[];
 }
 
-// ─── Admin Subscription Record ────────────────────────────────────────────────
 export interface AdminSubscriptionRecord {
   _id?: string;
-  id?: string;
+  id: string;
   tier?: string;
   scheduleType?: ScheduleType;
   userId?: {
@@ -145,7 +144,7 @@ export interface AdminSubscriptionRecord {
     phone?: string;
     avatar?: string;
   };
-  user?: {
+  user: {
     id: string;
     name: string;
     email: string;
@@ -187,9 +186,9 @@ export interface AdminSubscriptionRecord {
 }
 
 export interface AdminMetrics {
-  totalRevenueMonthly?: number;
+  totalRevenueMonthly: number;
   totalSubscribers: number;
-  activeSubscriptions?: number;
+  activeSubscriptions: number;
   activeCount?: number;
   scheduledCount?: number;
   cancelledCount?: number;
@@ -198,3 +197,24 @@ export interface AdminMetrics {
   mrr?: number;
 }
 
+
+export interface SubscriptionHistoryItem {
+  id: string;
+  planName: string;
+  tier: string | null;
+  status: 'active' | 'scheduled' | 'cancelled' | 'expired';
+  billingCycle: BillingCycle;
+  price: number;
+  currency: string;
+  startDate: string;
+  endDate: string;
+  scheduleType?: string;
+  cancelAtPeriodEnd: boolean;
+  cancelledAt: string | null;
+  cancellationMode: 'period_end' | 'immediate' | 'plan_change' | null;
+  changeType?: 'new' | 'upgrade' | 'downgrade';
+  previousPlanName?: string;
+  cancellationReason: string;
+  card: { brand: string; last4: string } | null;
+  createdAt: string;
+}

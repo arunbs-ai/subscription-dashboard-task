@@ -7,28 +7,19 @@ interface AuthState {
   isAuthenticated: boolean;
   role: Role;
   isLoading: boolean;
+  isInitializing: boolean;
   error: string | null;
 }
 
-// Rehydrate from localStorage tokens on app boot
-const rehydrateUser = (): { user: User | null; isAuthenticated: boolean } => {
-  const access = TokenStorage.getAccess();
-  if (!access) return { user: null, isAuthenticated: false };
-  // We'll fetch the actual user via getMe thunk after app loads
-  return { user: null, isAuthenticated: false };
-};
-
-const { user, isAuthenticated } = rehydrateUser();
-
 const initialState: AuthState = {
-  user,
-  isAuthenticated,
-  role: (user?.role as Role) || 'user',
+  user: null,
+  isAuthenticated: false,
+  role: 'user',
   isLoading: false,
+  isInitializing: !!TokenStorage.getAccess() || !!TokenStorage.getRefresh(),
   error: null,
 };
 
-// ─── Async Thunks ─────────────────────────────────────────────────────────────
 export const loginThunk = createAsyncThunk(
   'auth/login',
   async (credentials: { email: string; password: string }, { rejectWithValue }) => {
@@ -62,7 +53,6 @@ export const logoutThunk = createAsyncThunk('auth/logout', async (_, { rejectWit
   try {
     await authApi.logout();
   } catch (_) {
-    // Ignore server error on logout — clear tokens regardless
   } finally {
     TokenStorage.clear();
   }
@@ -73,14 +63,14 @@ export const getMeThunk = createAsyncThunk('auth/getMe', async (_, { rejectWithV
     const res = await authApi.getMe();
     return res.data.user as User;
   } catch (err: any) {
-    TokenStorage.clear();
+    if (err instanceof ApiError && err.status === 401) TokenStorage.clear();
     return rejectWithValue('Session expired');
   }
 });
 
 export const updateProfileThunk = createAsyncThunk(
   'auth/updateProfile',
-  async (data: { name?: string; company?: string; phone?: string }, { rejectWithValue }) => {
+  async (data: { name?: string; email?: string; company?: string; phone?: string }, { rejectWithValue }) => {
     try {
       const res = await userApi.updateProfile(data);
       return res.data.user as User;
@@ -102,7 +92,6 @@ export const changePasswordThunk = createAsyncThunk(
   }
 );
 
-// ─── Slice ────────────────────────────────────────────────────────────────────
 export const authSlice = createSlice({
   name: 'auth',
   initialState,
@@ -128,7 +117,6 @@ export const authSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
-    // Login
     builder
       .addCase(loginThunk.pending, (state) => { state.isLoading = true; state.error = null; })
       .addCase(loginThunk.fulfilled, (state, action) => {
@@ -143,7 +131,6 @@ export const authSlice = createSlice({
         state.error = action.payload as string;
       });
 
-    // Register
     builder
       .addCase(registerThunk.pending, (state) => { state.isLoading = true; state.error = null; })
       .addCase(registerThunk.fulfilled, (state, action) => {
@@ -158,7 +145,6 @@ export const authSlice = createSlice({
         state.error = action.payload as string;
       });
 
-    // Logout
     builder.addCase(logoutThunk.fulfilled, (state) => {
       state.user = null;
       state.isAuthenticated = false;
@@ -166,20 +152,20 @@ export const authSlice = createSlice({
       state.error = null;
     });
 
-    // GetMe (rehydrate)
     builder
       .addCase(getMeThunk.fulfilled, (state, action) => {
+        state.isInitializing = false;
         state.user = action.payload;
         state.isAuthenticated = true;
         state.role = action.payload.role || 'user';
       })
       .addCase(getMeThunk.rejected, (state) => {
+        state.isInitializing = false;
         state.user = null;
         state.isAuthenticated = false;
         state.role = 'user';
       });
 
-    // Update Profile
     builder
       .addCase(updateProfileThunk.fulfilled, (state, action) => {
         state.user = action.payload;

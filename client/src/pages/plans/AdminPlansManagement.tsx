@@ -1,18 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Layers,
   Plus,
   Search,
-  Edit,
+  Pencil,
   Archive,
   RotateCcw,
-  Sparkles,
   Package,
   History,
   Clock,
   ArrowRight,
   Loader2,
   Tag,
+  Star,
+  Users,
+  Zap,
+  HardDrive,
+  Check,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  X,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../store';
 import {
@@ -25,758 +33,750 @@ import {
   clearPlanNotification,
 } from '../../store/slices/planSlice';
 import { plansApi } from '../../services/api';
-import { StatCard } from '../../components/common/StatCard';
-import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
 import { Select } from '../../components/common/Select';
 import { Modal } from '../../components/common/Modal';
 import { Plan, PlanAuditLog } from '../../types';
+import { toTitleCase } from '../../utils/text';
+
+type Tier = 'starter' | 'pro' | 'enterprise';
+
+const TIER_OPTIONS = [
+  { value: 'starter', label: 'Starter' },
+  { value: 'pro', label: 'Professional' },
+  { value: 'enterprise', label: 'Enterprise' },
+];
+
+const planId = (p: Plan) => p._id || p.id || '';
+const isArchived = (p: Plan) => Boolean(p.isDeleted);
+const isLive = (p: Plan) => p.isActive && !p.isDeleted;
+const isHidden = (p: Plan) => !p.isActive && !p.isDeleted;
+
+const emptyForm = {
+  name: '',
+  tier: 'starter' as Tier,
+  description: '',
+  monthlyPrice: 29,
+  yearlyPrice: 290,
+  features: 'Up to 10 Team Members\n50,000 API Requests / Month\n25 GB Cloud Storage\nStandard Support',
+  apiLimit: 50000,
+  seats: 10,
+  storage: 25,
+  popular: false,
+  note: '',
+};
 
 export const AdminPlansManagement: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { plans, adminNotification, isLoading } = useAppSelector((state) => state.plans);
+  const { plans, notification, adminNotification, isLoading } = useAppSelector((s) => s.plans);
+  const toast = notification || adminNotification;
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
-  const [tierFilter, setTierFilter] = useState<'all' | 'starter' | 'pro' | 'enterprise'>('all');
+  const [viewPlan, setViewPlan] = useState<Plan | null>(null);
 
-  // Add / Edit Modal state
-  const [modalState, setModalState] = useState<{
-    isOpen: boolean;
-    mode: 'add' | 'edit';
-    planId?: string;
-  }>({
+  const [modal, setModal] = useState<{ isOpen: boolean; mode: 'add' | 'edit'; id?: string }>({
     isOpen: false,
     mode: 'add',
   });
-
-  const [formName, setFormName] = useState('');
-  const [formTier, setFormTier] = useState<'starter' | 'pro' | 'enterprise'>('starter');
-  const [formDescription, setFormDescription] = useState('');
-  const [formMonthlyPrice, setFormMonthlyPrice] = useState(29);
-  const [formYearlyPrice, setFormYearlyPrice] = useState(290);
-  const [formFeatures, setFormFeatures] = useState('');
-  const [formApiLimit, setFormApiLimit] = useState(50000);
-  const [formSeatsLimit, setFormSeatsLimit] = useState(10);
-  const [formStorageLimit, setFormStorageLimit] = useState(25);
-  const [formPopular, setFormPopular] = useState(false);
-  const [formAuditNote, setFormAuditNote] = useState('');
+  const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Audit History Modal state
-  const [auditModal, setAuditModal] = useState<{
+  const [audit, setAudit] = useState<{
     isOpen: boolean;
     planName: string;
-    auditLogs: PlanAuditLog[];
+    logs: PlanAuditLog[];
     isLoading: boolean;
-  }>({
-    isOpen: false,
-    planName: '',
-    auditLogs: [],
-    isLoading: false,
-  });
+  }>({ isOpen: false, planName: '', logs: [], isLoading: false });
 
-  // Fetch admin plans on mount
   useEffect(() => {
     dispatch(fetchAdminPlans(true));
   }, [dispatch]);
 
-  // Filter plans
-  const filteredPlans = plans.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.description.toLowerCase().includes(searchTerm.toLowerCase());
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => dispatch(clearPlanNotification()), 4000);
+    return () => clearTimeout(t);
+  }, [toast, dispatch]);
 
-    const matchesStatus =
-      statusFilter === 'all'
-        ? true
-        : statusFilter === 'active'
-        ? p.isActive && !p.isDeleted
-        : !p.isActive || p.isDeleted;
+  const counts = useMemo(
+    () => ({
+      all: plans.length,
+      live: plans.filter(isLive).length,
+      hidden: plans.filter(isHidden).length,
+    }),
+    [plans]
+  );
 
-    const matchesTier = tierFilter === 'all' ? true : p.tier === tierFilter;
+  const filteredPlans = plans;
 
-    return matchesSearch && matchesStatus && matchesTier;
-  });
-
-  const activeCount = plans.filter((p) => p.isActive && !p.isDeleted).length;
-  const archivedCount = plans.filter((p) => !p.isActive || p.isDeleted).length;
-
-  const handleOpenAdd = () => {
-    setFormName('');
-    setFormTier('starter');
-    setFormDescription('');
-    setFormMonthlyPrice(29);
-    setFormYearlyPrice(290);
-    setFormFeatures('Up to 10 Team Members\n50,000 API Requests/month\n25 GB Cloud Storage\nStandard SLA Support');
-    setFormApiLimit(50000);
-    setFormSeatsLimit(10);
-    setFormStorageLimit(25);
-    setFormPopular(false);
-    setFormAuditNote('');
-    setErrors({});
-    setModalState({ isOpen: true, mode: 'add' });
+  const setField = <K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    if (errors[key]) setErrors((prev) => ({ ...prev, [key]: '' }));
   };
 
-  const handleOpenEdit = (plan: Plan) => {
-    setFormName(plan.name);
-    setFormTier((plan.tier as 'starter' | 'pro' | 'enterprise') || 'starter');
-    setFormDescription(plan.description);
-    setFormMonthlyPrice(plan.monthlyPrice);
-    setFormYearlyPrice(plan.yearlyPrice);
-    setFormFeatures(
-      plan.features
-        .map((f) => (typeof f === 'string' ? f : f.label))
-        .join('\n')
-    );
-    setFormApiLimit(plan.limits?.apiRequests ?? 50000);
-    setFormSeatsLimit(plan.limits?.teamMembers ?? plan.maxUsers ?? 10);
-    setFormStorageLimit(plan.limits?.storageGB ?? plan.storageGB ?? 25);
-    setFormPopular(Boolean(plan.popular || plan.isFeatured));
-    setFormAuditNote('');
+  const openAdd = () => {
+    setForm(emptyForm);
     setErrors({});
-    setModalState({ isOpen: true, mode: 'edit', planId: plan._id || plan.id });
+    setModal({ isOpen: true, mode: 'add' });
   };
 
-  const handleOpenAudit = async (plan: Plan) => {
-    const id = plan._id || plan.id;
-    if (!id) return;
-    setAuditModal({
-      isOpen: true,
-      planName: plan.name,
-      auditLogs: [],
-      isLoading: true,
+  const openEdit = (plan: Plan) => {
+    setForm({
+      name: plan.name,
+      tier: ((plan.tier as Tier) || 'starter'),
+      description: plan.description,
+      monthlyPrice: plan.monthlyPrice,
+      yearlyPrice: plan.yearlyPrice,
+      features: plan.features.map((f) => (typeof f === 'string' ? f : f.label)).join('\n'),
+      apiLimit: plan.apiRequests ?? plan.limits?.apiRequests ?? 50000,
+      seats: plan.limits?.teamMembers ?? plan.maxUsers ?? 10,
+      storage: plan.limits?.storageGB ?? plan.storageGB ?? 25,
+      popular: Boolean(plan.popular || plan.isFeatured),
+      note: '',
     });
+    setErrors({});
+    setModal({ isOpen: true, mode: 'edit', id: planId(plan) });
+  };
+
+  const closeModal = () => setModal({ isOpen: false, mode: 'add' });
+
+  const openAudit = async (plan: Plan) => {
+    const id = planId(plan);
+    if (!id) return;
+    setAudit({ isOpen: true, planName: plan.name, logs: [], isLoading: true });
     try {
       const res = await plansApi.admin.getAuditHistory(id);
-      setAuditModal({
+      setAudit({
         isOpen: true,
         planName: res.data.planName || plan.name,
-        auditLogs: res.data.auditHistory || [],
+        logs: res.data.auditHistory || [],
         isLoading: false,
       });
     } catch {
-      setAuditModal((prev) => ({ ...prev, isLoading: false }));
+      setAudit((prev) => ({ ...prev, isLoading: false }));
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     const errs: Record<string, string> = {};
-
-    if (!formName.trim()) errs.name = 'Plan Name is required.';
-    if (!formDescription.trim()) errs.description = 'Plan Description is required.';
-    if (formMonthlyPrice <= 0) errs.monthlyPrice = 'Monthly price must be greater than $0.';
-    if (formYearlyPrice <= 0) errs.yearlyPrice = 'Yearly price must be greater than $0.';
-    if (!formFeatures.trim()) errs.features = 'Please provide at least one feature item.';
-
-    if (Object.keys(errs).length > 0) {
-      setErrors(errs);
-      return;
-    }
-
-    const featureList = formFeatures
+    if (form.name.trim().length < 2) errs.name = 'Plan name must be at least 2 characters.';
+    if (form.description.trim().length < 5) errs.description = 'Description must be at least 5 characters.';
+    if (!(form.monthlyPrice > 0)) errs.monthlyPrice = 'Monthly price must be greater than 0.';
+    if (!(form.yearlyPrice > 0)) errs.yearlyPrice = 'Yearly price must be greater than 0.';
+    if (form.seats < 1) errs.seats = 'At least 1 seat.';
+    if (form.apiLimit < 0) errs.apiLimit = 'Cannot be negative.';
+    if (form.storage < 0) errs.storage = 'Cannot be negative.';
+    const featureList = form.features
       .split('\n')
       .map((f) => f.trim())
       .filter(Boolean)
       .map((label) => ({ label, included: true }));
+    if (featureList.length === 0) errs.features = 'Add at least one feature (one per line).';
 
-    const planPayload: Record<string, unknown> = {
-      name: formName.trim(),
-      description: formDescription.trim(),
-      monthlyPrice: Number(formMonthlyPrice),
-      yearlyPrice: Number(formYearlyPrice),
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
+      name: form.name.trim(),
+      tier: form.tier,
+      description: form.description.trim(),
+      monthlyPrice: Number(form.monthlyPrice),
+      yearlyPrice: Number(form.yearlyPrice),
       currency: 'USD',
       billingCycle: 'both',
       features: featureList,
-      maxUsers: Number(formSeatsLimit),
+      apiRequests: Number(form.apiLimit),
+      maxUsers: Number(form.seats),
       maxProjects: 999,
-      storageGB: Number(formStorageLimit),
-      isFeatured: formPopular,
-      note: formAuditNote.trim() || undefined,
+      storageGB: Number(form.storage),
+      isFeatured: form.popular,
+      note: form.note.trim() || undefined,
     };
 
     setIsSubmitting(true);
     try {
-      if (modalState.mode === 'add') {
-        await dispatch(createPlanThunk(planPayload)).unwrap();
-      } else if (modalState.mode === 'edit' && modalState.planId) {
-        await dispatch(updatePlanThunk({ id: modalState.planId, data: planPayload })).unwrap();
+      if (modal.mode === 'add') {
+        await dispatch(createPlanThunk(payload)).unwrap();
+      } else if (modal.id) {
+        await dispatch(updatePlanThunk({ id: modal.id, data: payload })).unwrap();
       }
-      setModalState({ isOpen: false, mode: 'add' });
+      closeModal();
       dispatch(fetchAdminPlans(true));
     } catch (err: any) {
-      setErrors({ form: typeof err === 'string' ? err : 'Operation failed' });
+      setErrors({ form: typeof err === 'string' ? err : 'Operation failed.' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleDelete = async (plan: Plan) => {
-    const id = plan._id || plan.id;
-    if (!id) return;
-    const note = window.prompt(`Reason for archiving "${plan.name}" (recorded in audit log):`);
-    await dispatch(deletePlanThunk({ id, note: note || undefined }));
+  const handleToggle = async (plan: Plan) => {
+    await dispatch(toggleActivePlanThunk(planId(plan)));
     dispatch(fetchAdminPlans(true));
   };
 
-  const handleRestore = async (plan: Plan) => {
-    const id = plan._id || plan.id;
-    if (!id) return;
-    await dispatch(restorePlanThunk({ id, note: 'Plan restored from archive' }));
-    dispatch(fetchAdminPlans(true));
-  };
-
-  const handleToggleActive = async (plan: Plan) => {
-    const id = plan._id || plan.id;
-    if (!id) return;
-    await dispatch(toggleActivePlanThunk(id));
-    dispatch(fetchAdminPlans(true));
+  const yearlySaving = (p: { monthlyPrice: number; yearlyPrice: number }) => {
+    const full = p.monthlyPrice * 12;
+    return full > 0 && p.yearlyPrice < full ? Math.round((1 - p.yearlyPrice / full) * 100) : 0;
   };
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-8">
-      {/* Toast Notification */}
-      {adminNotification && (
-        <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 flex items-center justify-between text-sm text-indigo-900 dark:text-indigo-200 animate-in fade-in">
-          <span>{adminNotification}</span>
+    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-6">
+      {toast && (
+        <div className="fixed top-20 right-4 z-50 max-w-sm p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 shadow-lg flex items-start gap-2.5 text-sm text-slate-800 dark:text-slate-100 animate-in fade-in">
+          <CheckCircle2 className="w-4 h-4 text-brand-600 dark:text-brand-400 mt-0.5 shrink-0" />
+          <span className="flex-1">{toast}</span>
           <button
             onClick={() => dispatch(clearPlanNotification())}
-            className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            aria-label="Dismiss"
           >
-            Dismiss
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* Header section */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-              Plans & Pricing Management
-            </h1>
-            <Badge variant="indigo" size="sm">
-              Admin Configuration
-            </Badge>
-          </div>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Configure subscription tiers, pricing intervals, resource limits, soft-delete visibility, and full audit logs
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Plans & Prices Management
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Create plans, set prices and limits, control what customers see, and review every change.
           </p>
         </div>
+        <Button variant="primary" onClick={openAdd} leftIcon={<Plus className="w-4 h-4" />}>
+          Create Plan
+        </Button>
+      </div>
 
-        <div className="flex items-center gap-2.5">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleOpenAdd}
-            leftIcon={<Plus className="w-4 h-4" />}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[
+          { label: 'Total Plans', value: counts.all, icon: Layers, tone: 'text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-950/50' },
+          { label: 'Live For Customers', value: counts.live, icon: Eye, tone: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40' },
+          { label: 'Hidden', value: counts.hidden, icon: EyeOff, tone: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40' },
+        ].map(({ label, value, icon: Icon, tone }) => (
+          <div
+            key={label}
+            className="flex items-center gap-3 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800"
           >
-            Create New Plan
-          </Button>
-        </div>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${tone}`}>
+              <Icon className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-2xl font-extrabold text-slate-900 dark:text-white leading-none">{value}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{label}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* KPI Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Total Configured Plans"
-          value={plans.length}
-          icon={<Layers className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />}
-          subtitle="Total active and archived plans"
-        />
-        <StatCard
-          title="Active Live Plans"
-          value={activeCount}
-          icon={<Package className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />}
-          subtitle="Visible to users on checkout"
-        />
-        <StatCard
-          title="Archived (Soft Deleted)"
-          value={archivedCount}
-          icon={<Archive className="w-5 h-5 text-rose-600 dark:text-rose-400" />}
-          subtitle="Hidden from user catalog"
-        />
-        <StatCard
-          title="Audit Trail System"
-          value="Enabled"
-          icon={<History className="w-5 h-5 text-violet-600 dark:text-violet-400" />}
-          subtitle="Old vs new value history"
-        />
-      </div>
-
-      {/* Filter and search toolbar */}
-      <Card className="p-4 sm:p-5">
-        <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
-          <div className="flex-1 max-w-md">
-            <Input
-              placeholder="Search plans by title or keyword..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              leftIcon={<Search className="w-4 h-4 text-slate-400" />}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              options={[
-                { value: 'all', label: 'All Statuses' },
-                { value: 'active', label: 'Active Live Only' },
-                { value: 'archived', label: 'Archived Only' },
-              ]}
-              className="w-36 text-xs"
-            />
-
-            <Select
-              value={tierFilter}
-              onChange={(e) => setTierFilter(e.target.value as any)}
-              options={[
-                { value: 'all', label: 'All Tiers' },
-                { value: 'starter', label: 'Starter' },
-                { value: 'pro', label: 'Professional' },
-                { value: 'enterprise', label: 'Enterprise' },
-              ]}
-              className="w-36 text-xs"
-            />
-          </div>
+      {isLoading && plans.length === 0 ? (
+        <div className="py-20 text-center text-slate-400">
+          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-brand-500" />
+          Loading plans...
         </div>
-      </Card>
-
-      {/* Plans Table */}
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                <th className="py-3.5 px-6">Plan Info</th>
-                <th className="py-3.5 px-6">Monthly Rate</th>
-                <th className="py-3.5 px-6">Annual Rate</th>
-                <th className="py-3.5 px-6">Limits & Specs</th>
-                <th className="py-3.5 px-6">Status</th>
-                <th className="py-3.5 px-6 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200/80 dark:divide-slate-800 text-sm">
-              {isLoading && plans.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
-                    Loading plans from server...
-                  </td>
-                </tr>
-              ) : filteredPlans.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    No plans found matching your criteria.
-                  </td>
-                </tr>
-              ) : (
-                filteredPlans.map((plan) => (
-                  <tr
-                    key={plan._id || plan.id}
-                    className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
-                  >
-                    {/* Plan Info */}
-                    <td className="py-4 px-6">
-                      <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5">
-                          <Package className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-900 dark:text-white text-sm">
-                              {plan.name}
-                            </span>
-                            <Badge variant="indigo" size="sm">
-                              {(plan.tier || 'PLAN').toUpperCase()}
-                            </Badge>
-                            {(plan.popular || plan.isFeatured) && (
-                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300">
-                                Most Popular
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 max-w-sm line-clamp-1">
-                            {plan.description}
-                          </p>
-                          <span className="font-mono text-[10px] text-slate-400 mt-1 block">
-                            ID: {plan._id || plan.id}
+      ) : filteredPlans.length === 0 ? (
+        <div className="py-16 text-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
+          <Package className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
+          <p className="mt-3 text-sm font-medium text-slate-600 dark:text-slate-300">No plans created yet</p>
+          <p className="text-xs text-slate-400 mt-1">Click Create Plan to add your first plan.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          {filteredPlans.map((plan) => {
+            const archived = isArchived(plan);
+            const live = isLive(plan);
+            const saving = yearlySaving(plan);
+            const featureLabels = plan.features.map((f) => (typeof f === 'string' ? f : f.label));
+            return (
+              <div
+                key={planId(plan)}
+                className={`flex flex-col rounded-2xl bg-white dark:bg-slate-900 border shadow-sm transition-shadow hover:shadow-md ${
+                  archived
+                    ? 'border-slate-200 dark:border-slate-800 opacity-75'
+                    : 'border-slate-200/80 dark:border-slate-800'
+                }`}
+              >
+                <div className="p-5 pb-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white truncate">{plan.name}</h3>
+                        <Badge variant="indigo" size="sm">
+                          {toTitleCase(plan.tier || 'plan')}
+                        </Badge>
+                        {(plan.popular || plan.isFeatured) && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300">
+                            <Star className="w-3 h-3" /> Most Popular
                           </span>
-                        </div>
+                        )}
                       </div>
-                    </td>
-
-                    {/* Monthly Price */}
-                    <td className="py-4 px-6">
-                      <span className="font-extrabold text-slate-900 dark:text-white text-sm">
-                        ${plan.monthlyPrice}
-                      </span>
-                      <span className="text-slate-400 ml-1">/ mo</span>
-                    </td>
-
-                    {/* Annual Price */}
-                    <td className="py-4 px-6">
-                      <span className="font-extrabold text-slate-900 dark:text-white text-sm">
-                        ${plan.yearlyPrice}
-                      </span>
-                      <span className="text-slate-400 ml-1">/ yr</span>
-                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                        ${Math.round(plan.yearlyPrice / 12)}/mo billed yearly
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 min-h-[2rem]">
+                        {plan.description}
                       </p>
-                    </td>
+                    </div>
 
-                    {/* Limits */}
-                    <td className="py-4 px-6">
-                      <div className="space-y-0.5 text-[11px] text-slate-600 dark:text-slate-300">
-                        <p>
-                          <strong>{plan.limits?.teamMembers ?? plan.maxUsers ?? 10}</strong> Team Seats
-                        </p>
-                        <p>
-                          <strong>{(plan.limits?.apiRequests ?? 50000).toLocaleString()}</strong> API Calls
-                        </p>
-                        <p>
-                          <strong>{plan.limits?.storageGB ?? plan.storageGB ?? 25} GB</strong> Cloud Storage
-                        </p>
-                      </div>
-                    </td>
-
-                    {/* Visibility Status */}
-                    <td className="py-4 px-6">
-                      {plan.isDeleted ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                          <Archive className="w-3.5 h-3.5" />
-                          Archived (Soft Deleted)
+                    {archived ? (
+                      <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                        <Archive className="w-3 h-3" /> Archived
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={live}
+                        onClick={() => handleToggle(plan)}
+                        title={live ? 'Live for customers. Click to hide.' : 'Hidden from customers. Click to publish.'}
+                        className="shrink-0 flex flex-col items-center gap-1"
+                      >
+                        <span
+                          className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${
+                            live ? 'bg-brand-600' : 'bg-slate-300 dark:bg-slate-600'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                              live ? 'left-[1.1rem]' : 'left-0.5'
+                            }`}
+                          />
                         </span>
-                      ) : plan.isActive ? (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleActive(plan)}
-                          title="Click to deactivate plan"
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:opacity-80 transition-opacity"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          Active (Live for Users)
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleActive(plan)}
-                          title="Click to activate plan"
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:opacity-80 transition-opacity"
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                          Inactive
-                        </button>
-                      )}
-                    </td>
+                        <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                          {live ? 'Live' : 'Hidden'}
+                        </span>
+                      </button>
+                    )}
+                  </div>
 
-                    {/* Actions */}
-                    <td className="py-4 px-6 text-right space-x-1.5 whitespace-nowrap">
-                      {/* Audit History button */}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenAudit(plan)}
-                        leftIcon={<History className="w-3.5 h-3.5 text-indigo-500" />}
-                        title="View complete audit trail with old and new values"
-                      >
-                        Audit
-                      </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Monthly</p>
+                      <p className="text-xl font-extrabold text-slate-900 dark:text-white">
+                        ${plan.monthlyPrice}
+                        <span className="text-xs font-medium text-slate-400"> / Mo</span>
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Yearly
+                        {saving > 0 && (
+                          <span className="ml-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                            Save {saving}%
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xl font-extrabold text-slate-900 dark:text-white">
+                        ${plan.yearlyPrice}
+                        <span className="text-xs font-medium text-slate-400"> / Yr</span>
+                      </p>
+                    </div>
+                  </div>
 
-                      {/* Edit button */}
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => handleOpenEdit(plan)}
-                        leftIcon={<Edit className="w-3.5 h-3.5" />}
-                      >
-                        Edit
-                      </Button>
+                  <div className="flex flex-wrap gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-brand-50 dark:bg-brand-950/40">
+                      <Users className="w-3 h-3 text-brand-600 dark:text-brand-400" />
+                      {plan.limits?.teamMembers ?? plan.maxUsers ?? 10} Seats
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-brand-50 dark:bg-brand-950/40">
+                      <Zap className="w-3 h-3 text-brand-600 dark:text-brand-400" />
+                      {(plan.apiRequests ?? plan.limits?.apiRequests ?? 50000).toLocaleString()} API Calls
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-brand-50 dark:bg-brand-950/40">
+                      <HardDrive className="w-3 h-3 text-brand-600 dark:text-brand-400" />
+                      {plan.limits?.storageGB ?? plan.storageGB ?? 25} GB
+                    </span>
+                  </div>
+                </div>
 
-                      {/* Soft Delete / Restore */}
-                      {plan.isDeleted ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRestore(plan)}
-                          className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-                          leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
-                          title="Restore soft-deleted plan back to catalog"
-                        >
-                          Restore
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(plan)}
-                          className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                          leftIcon={<Archive className="w-3.5 h-3.5" />}
-                          title="Soft delete (archive) plan with reason note"
-                        >
-                          Archive
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                <ul className="px-5 pb-4 space-y-1.5 text-xs text-slate-600 dark:text-slate-300 flex-1">
+                  {featureLabels.slice(0, 4).map((label, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Check className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                      <span className="line-clamp-1">{label}</span>
+                    </li>
+                  ))}
+                  {featureLabels.length > 4 && (
+                    <li className="text-[11px] text-slate-400 pl-5">+{featureLabels.length - 4} more features</li>
+                  )}
+                </ul>
+
+                <div className="flex items-center gap-2 px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/30 rounded-b-2xl">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setViewPlan(plan)}
+                    leftIcon={<Eye className="w-3.5 h-3.5" />}
+                    className="flex-1"
+                  >
+                    View
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => openEdit(plan)}
+                    leftIcon={<Pencil className="w-3.5 h-3.5" />}
+                    className="flex-1"
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openAudit(plan)}
+                    leftIcon={<History className="w-3.5 h-3.5" />}
+                    title="View change history"
+                  >
+                    History
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      </Card>
+      )}
 
-      {/* Add / Edit Plan Modal */}
       <Modal
-        isOpen={modalState.isOpen}
-        onClose={() => setModalState({ isOpen: false, mode: 'add' })}
-        title={modalState.mode === 'add' ? 'Create New Subscription Plan' : `Edit Plan — ${formName}`}
-        maxWidth="lg"
+        isOpen={modal.isOpen}
+        onClose={closeModal}
+        title={modal.mode === 'add' ? 'Create Plan' : `Edit Plan: ${form.name}`}
+        description="Fields marked with an asterisk are required."
+        maxWidth="2xl"
         footer={
           <div className="flex justify-end gap-3 w-full">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setModalState({ isOpen: false, mode: 'add' })}
-              disabled={isSubmitting}
-            >
+            <Button variant="secondary" size="sm" onClick={closeModal} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleSave}
-              isLoading={isSubmitting}
-              leftIcon={<Sparkles className="w-4 h-4" />}
-            >
-              {modalState.mode === 'add' ? 'Publish Plan' : 'Save Changes'}
+            <Button variant="primary" size="sm" onClick={() => handleSave()} isLoading={isSubmitting}>
+              {modal.mode === 'add' ? 'Create Plan' : 'Save Changes'}
             </Button>
           </div>
         }
       >
-        <form onSubmit={handleSave} className="space-y-4">
+        <form onSubmit={handleSave} className="space-y-6" noValidate>
           {errors.form && (
             <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
               {errors.form}
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <section className="space-y-4">
+            <h4 className="text-xs font-bold text-brand-600 dark:text-brand-400">Basic Information</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="sm:col-span-2">
+                <Input
+                  label="Plan Name *"
+                  placeholder="e.g. Scale Pro"
+                  value={form.name}
+                  onChange={(e) => setField('name', e.target.value)}
+                  error={errors.name}
+                  maxLength={100}
+                />
+              </div>
+              <Select
+                label="Tier"
+                value={form.tier}
+                onChange={(e) => setField('tier', e.target.value as Tier)}
+                options={TIER_OPTIONS}
+              />
+            </div>
             <Input
-              label="Plan Name"
-              placeholder="e.g. Scale Pro"
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              error={errors.name}
-              required
+              label="Description *"
+              placeholder="A short summary of who this plan is for"
+              value={form.description}
+              onChange={(e) => setField('description', e.target.value)}
+              error={errors.description}
+              maxLength={500}
             />
+          </section>
 
-            <Select
-              label="Tier Classification"
-              value={formTier}
-              onChange={(e) => setFormTier(e.target.value as any)}
-              options={[
-                { value: 'starter', label: 'Starter' },
-                { value: 'pro', label: 'Professional' },
-                { value: 'enterprise', label: 'Enterprise' },
-              ]}
-            />
-          </div>
+          <section className="space-y-4">
+            <h4 className="text-xs font-bold text-brand-600 dark:text-brand-400">Pricing (USD)</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="Monthly Price *"
+                type="number"
+                min={1}
+                value={form.monthlyPrice}
+                onChange={(e) => setField('monthlyPrice', Number(e.target.value))}
+                error={errors.monthlyPrice}
+                leftIcon={<span className="text-sm">$</span>}
+              />
+              <Input
+                label="Yearly Price *"
+                type="number"
+                min={1}
+                value={form.yearlyPrice}
+                onChange={(e) => setField('yearlyPrice', Number(e.target.value))}
+                error={errors.yearlyPrice}
+                leftIcon={<span className="text-sm">$</span>}
+                helperText={
+                  yearlySaving(form) > 0
+                    ? `Customers save ${yearlySaving(form)}% compared to paying monthly.`
+                    : 'Yearly price is not lower than 12 months of monthly billing.'
+                }
+              />
+            </div>
+          </section>
 
-          <Input
-            label="Plan Description"
-            placeholder="A short summary of who this plan is suitable for"
-            value={formDescription}
-            onChange={(e) => setFormDescription(e.target.value)}
-            error={errors.description}
-            required
-          />
+          <section className="space-y-4">
+            <h4 className="text-xs font-bold text-brand-600 dark:text-brand-400">Limits</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Input
+                label="Team Seats"
+                type="number"
+                min={1}
+                value={form.seats}
+                onChange={(e) => setField('seats', Number(e.target.value))}
+                error={errors.seats}
+              />
+              <Input
+                label="API Requests / Month"
+                type="number"
+                min={0}
+                value={form.apiLimit}
+                onChange={(e) => setField('apiLimit', Number(e.target.value))}
+                error={errors.apiLimit}
+              />
+              <Input
+                label="Storage (GB)"
+                type="number"
+                min={0}
+                value={form.storage}
+                onChange={(e) => setField('storage', Number(e.target.value))}
+                error={errors.storage}
+              />
+            </div>
+          </section>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Monthly Price ($ USD)"
-              type="number"
-              min={1}
-              value={formMonthlyPrice}
-              onChange={(e) => setFormMonthlyPrice(Number(e.target.value))}
-              error={errors.monthlyPrice}
-              required
-            />
-            <Input
-              label="Yearly Price ($ USD)"
-              type="number"
-              min={1}
-              value={formYearlyPrice}
-              onChange={(e) => setFormYearlyPrice(Number(e.target.value))}
-              error={errors.yearlyPrice}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Input
-              label="API Limit"
-              type="number"
-              value={formApiLimit}
-              onChange={(e) => setFormApiLimit(Number(e.target.value))}
-            />
-            <Input
-              label="Team Seats"
-              type="number"
-              value={formSeatsLimit}
-              onChange={(e) => setFormSeatsLimit(Number(e.target.value))}
-            />
-            <Input
-              label="Storage (GB)"
-              type="number"
-              value={formStorageLimit}
-              onChange={(e) => setFormStorageLimit(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Features (One per line)
+          <section className="space-y-3">
+            <h4 className="text-xs font-bold text-brand-600 dark:text-brand-400">Features</h4>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Feature List (One Per Line) *
+              </label>
+              <textarea
+                rows={5}
+                value={form.features}
+                onChange={(e) => setField('features', e.target.value)}
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm p-3 focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              />
+              {errors.features && <p className="text-xs text-rose-500 font-medium">{errors.features}</p>}
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-700 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={form.popular}
+                onChange={(e) => setField('popular', e.target.checked)}
+                className="rounded border-slate-300 dark:border-slate-700 text-brand-600 focus:ring-brand-500"
+              />
+              Highlight As "Most Popular"
             </label>
-            <textarea
-              rows={4}
-              value={formFeatures}
-              onChange={(e) => setFormFeatures(e.target.value)}
-              placeholder="Up to 10 Team Members&#10;50,000 API Requests/month&#10;Standard Support"
-              className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-            />
-            {errors.features && (
-              <p className="text-xs text-rose-500">{errors.features}</p>
-            )}
-          </div>
+          </section>
 
           <Input
-            label="Audit Log Note (Reason for change)"
+            label="Change Note (Saved In History)"
             placeholder="e.g. Updated yearly price for Q4 promotion"
-            value={formAuditNote}
-            onChange={(e) => setFormAuditNote(e.target.value)}
+            value={form.note}
+            onChange={(e) => setField('note', e.target.value)}
           />
-
-          <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 dark:text-slate-300">
-            <input
-              type="checkbox"
-              checked={formPopular}
-              onChange={(e) => setFormPopular(e.target.checked)}
-              className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500"
-            />
-            <span>Highlight as "Most Popular"</span>
-          </label>
         </form>
       </Modal>
 
-      {/* Plan Audit History Modal */}
       <Modal
-        isOpen={auditModal.isOpen}
-        onClose={() => setAuditModal((prev) => ({ ...prev, isOpen: false }))}
-        title={`Audit History — ${auditModal.planName}`}
+        isOpen={Boolean(viewPlan)}
+        onClose={() => setViewPlan(null)}
+        title={viewPlan?.name ?? 'Plan Details'}
+        description={viewPlan?.description}
         maxWidth="lg"
-      >
-        <div className="space-y-4">
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Immutable audit logs maintained in the dedicated <span className="font-mono text-indigo-500 font-semibold">PLAN_AUDIT_LOGS</span> collection with tracked old and new values.
-          </p>
-
-          {auditModal.isLoading ? (
-            <div className="py-12 flex items-center justify-center">
-              <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-            </div>
-          ) : auditModal.auditLogs.length === 0 ? (
-            <div className="py-8 text-center text-sm text-slate-400">
-              No audit records found for this plan.
-            </div>
-          ) : (
-            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-              {auditModal.auditLogs.map((log) => (
-                <div
-                  key={log._id}
-                  className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 space-y-2 text-xs"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        variant={
-                          log.action === 'created'
-                            ? 'emerald'
-                            : log.action === 'deleted'
-                            ? 'rose'
-                            : log.action === 'restored'
-                            ? 'amber'
-                            : 'indigo'
-                        }
-                        size="sm"
-                      >
-                        {log.action.toUpperCase()}
-                      </Badge>
-                      <span className="font-semibold text-slate-900 dark:text-white">
-                        {log.performedByName} ({log.performedByEmail})
-                      </span>
-                    </div>
-                    <span className="text-slate-400 flex items-center gap-1 font-mono text-[11px]">
-                      <Clock className="w-3 h-3" />
-                      {new Date(log.timestamp).toLocaleString()}
-                    </span>
-                  </div>
-
-                  {log.note && (
-                    <p className="text-slate-600 dark:text-slate-300 italic bg-white dark:bg-slate-900/60 p-2 rounded-lg border border-slate-200/50 dark:border-slate-800">
-                      &ldquo;{log.note}&rdquo;
-                    </p>
-                  )}
-
-                  {log.changes && Object.keys(log.changes).length > 0 && (
-                    <div className="mt-2 space-y-1.5 pt-2 border-t border-slate-200 dark:border-slate-700/60">
-                      <p className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                        <Tag className="w-3 h-3 text-indigo-500" />
-                        Modified Fields:
-                      </p>
-                      <div className="grid grid-cols-1 gap-1.5">
-                        {Object.entries(log.changes).map(([field, diff]) => (
-                          <div
-                            key={field}
-                            className="flex items-center justify-between bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200/60 dark:border-slate-800 font-mono text-[11px]"
-                          >
-                            <span className="font-semibold text-indigo-600 dark:text-indigo-400">
-                              {field}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 line-through">
-                                {typeof diff.oldValue === 'object' ? JSON.stringify(diff.oldValue) : String(diff.oldValue ?? 'none')}
-                              </span>
-                              <ArrowRight className="w-3 h-3 text-slate-400" />
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 font-bold">
-                                {typeof diff.newValue === 'object' ? JSON.stringify(diff.newValue) : String(diff.newValue ?? 'none')}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="flex justify-end pt-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setAuditModal((prev) => ({ ...prev, isOpen: false }))}
-            >
+        footer={
+          <div className="flex justify-end gap-3 w-full">
+            <Button variant="secondary" size="sm" onClick={() => setViewPlan(null)}>
               Close
             </Button>
+            {viewPlan && (
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={<Pencil className="w-3.5 h-3.5" />}
+                onClick={() => {
+                  const p = viewPlan;
+                  setViewPlan(null);
+                  openEdit(p);
+                }}
+              >
+                Edit Plan
+              </Button>
+            )}
           </div>
-        </div>
+        }
+      >
+        {viewPlan && (
+          <div className="space-y-5 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="indigo" size="sm">{toTitleCase(viewPlan.tier || 'plan')}</Badge>
+              {isLive(viewPlan) ? (
+                <Badge variant="emerald" size="sm" dot>Live For Customers</Badge>
+              ) : isArchived(viewPlan) ? (
+                <Badge variant="rose" size="sm" dot>Archived</Badge>
+              ) : (
+                <Badge variant="amber" size="sm" dot>Hidden</Badge>
+              )}
+              {(viewPlan.popular || viewPlan.isFeatured) && (
+                <Badge variant="amber" size="sm">Most Popular</Badge>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5">
+                <p className="text-xs text-slate-500 dark:text-slate-400">Monthly Price</p>
+                <p className="text-2xl font-extrabold text-slate-900 dark:text-white">${viewPlan.monthlyPrice}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Yearly Price
+                  {yearlySaving(viewPlan) > 0 && (
+                    <span className="ml-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                      Save {yearlySaving(viewPlan)}%
+                    </span>
+                  )}
+                </p>
+                <p className="text-2xl font-extrabold text-slate-900 dark:text-white">${viewPlan.yearlyPrice}</p>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-xs font-bold text-brand-600 dark:text-brand-400 mb-2">Limits</h4>
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-center">
+                  <Users className="w-4 h-4 mx-auto text-brand-600 dark:text-brand-400" />
+                  <p className="mt-1 font-bold text-slate-900 dark:text-white">
+                    {viewPlan.limits?.teamMembers ?? viewPlan.maxUsers ?? 10}
+                  </p>
+                  <p className="text-slate-500 dark:text-slate-400">Team Seats</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-center">
+                  <Zap className="w-4 h-4 mx-auto text-brand-600 dark:text-brand-400" />
+                  <p className="mt-1 font-bold text-slate-900 dark:text-white">
+                    {(viewPlan.apiRequests ?? viewPlan.limits?.apiRequests ?? 50000).toLocaleString()}
+                  </p>
+                  <p className="text-slate-500 dark:text-slate-400">API Requests</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-center">
+                  <HardDrive className="w-4 h-4 mx-auto text-brand-600 dark:text-brand-400" />
+                  <p className="mt-1 font-bold text-slate-900 dark:text-white">
+                    {viewPlan.limits?.storageGB ?? viewPlan.storageGB ?? 25} GB
+                  </p>
+                  <p className="text-slate-500 dark:text-slate-400">Storage</p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-xs font-bold text-brand-600 dark:text-brand-400 mb-2">Features</h4>
+              <ul className="space-y-1.5 text-xs text-slate-700 dark:text-slate-300">
+                {viewPlan.features.map((f, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <Check className="w-3.5 h-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                    <span>{typeof f === 'string' ? f : f.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs text-slate-500 dark:text-slate-400 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <p>Created: {viewPlan.createdAt ? new Date(viewPlan.createdAt).toLocaleString() : 'N/A'}</p>
+              <p>Last Updated: {viewPlan.updatedAt ? new Date(viewPlan.updatedAt).toLocaleString() : 'N/A'}</p>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={audit.isOpen}
+        onClose={() => setAudit((prev) => ({ ...prev, isOpen: false }))}
+        title={`Change History: ${audit.planName}`}
+        description="Every create, edit, archive and restore, with the old and new values."
+        maxWidth="lg"
+      >
+        {audit.isLoading ? (
+          <div className="py-12 flex items-center justify-center">
+            <Loader2 className="w-6 h-6 animate-spin text-brand-600" />
+          </div>
+        ) : audit.logs.length === 0 ? (
+          <div className="py-8 text-center text-sm text-slate-400">No history found for this plan.</div>
+        ) : (
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            {audit.logs.map((log) => (
+              <div
+                key={log._id}
+                className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 space-y-2 text-xs"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant={
+                        log.action === 'created'
+                          ? 'emerald'
+                          : log.action === 'deleted'
+                          ? 'rose'
+                          : log.action === 'restored'
+                          ? 'amber'
+                          : 'indigo'
+                      }
+                      size="sm"
+                    >
+                      {log.action === 'deleted' ? 'Archived' : toTitleCase(log.action)}
+                    </Badge>
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {log.performedByName}
+                      <span className="font-normal text-slate-400"> ({log.performedByEmail})</span>
+                    </span>
+                  </div>
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <Clock className="w-3 h-3" />
+                    {new Date(log.timestamp).toLocaleString()}
+                  </span>
+                </div>
+
+                {log.note && (
+                  <p className="text-slate-600 dark:text-slate-300 italic bg-white dark:bg-slate-900/60 p-2 rounded-lg border border-slate-200/50 dark:border-slate-800">
+                    &ldquo;{log.note}&rdquo;
+                  </p>
+                )}
+
+                {log.changes && Object.keys(log.changes).length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60 space-y-1.5">
+                    <p className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                      <Tag className="w-3 h-3 text-brand-500" />
+                      Changed Fields
+                    </p>
+                    {Object.entries(log.changes).map(([field, diff]) => (
+                      <div
+                        key={field}
+                        className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200/60 dark:border-slate-800 text-[11px]"
+                      >
+                        <span className="font-semibold text-brand-600 dark:text-brand-400">{toTitleCase(field)}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 line-through">
+                            {typeof diff.oldValue === 'object' ? JSON.stringify(diff.oldValue) : String(diff.oldValue ?? 'None')}
+                          </span>
+                          <ArrowRight className="w-3 h-3 text-slate-400" />
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 font-semibold">
+                            {typeof diff.newValue === 'object' ? JSON.stringify(diff.newValue) : String(diff.newValue ?? 'None')}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </Modal>
     </div>
   );

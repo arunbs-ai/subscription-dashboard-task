@@ -1,4 +1,7 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { env } from '../../config/env';
+
+const THEME_KEY = `${env.storagePrefix}_theme`;
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -7,7 +10,7 @@ interface ThemeState {
 }
 
 const getInitialTheme = (): ThemeMode => {
-  const saved = localStorage.getItem('subpulse_theme') as ThemeMode | null;
+  const saved = localStorage.getItem(THEME_KEY) as ThemeMode | null;
   if (saved === 'light' || saved === 'dark') {
     return saved;
   }
@@ -36,7 +39,7 @@ export const themeSlice = createSlice({
   reducers: {
     toggleTheme: (state) => {
       state.mode = state.mode === 'light' ? 'dark' : 'light';
-      localStorage.setItem('subpulse_theme', state.mode);
+      localStorage.setItem(THEME_KEY, state.mode);
       if (state.mode === 'dark') {
         document.documentElement.classList.add('dark');
       } else {
@@ -45,7 +48,7 @@ export const themeSlice = createSlice({
     },
     setTheme: (state, action: PayloadAction<ThemeMode>) => {
       state.mode = action.payload;
-      localStorage.setItem('subpulse_theme', state.mode);
+      localStorage.setItem(THEME_KEY, state.mode);
       if (state.mode === 'dark') {
         document.documentElement.classList.add('dark');
       } else {

@@ -1,4 +1,3 @@
-/** @type {import('tailwindcss').Config} */
 export default {
   content: [
     "./index.html",
@@ -9,17 +8,17 @@ export default {
     extend: {
       colors: {
         brand: {
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#4f46e5',
-          700: '#4338ca',
-          800: '#3730a3',
-          900: '#312e81',
-          950: '#1e1b4b',
+          50: '#f5f2ff',
+          100: '#ece6ff',
+          200: '#dbd0ff',
+          300: '#c2affe',
+          400: '#a384ff',
+          500: '#8f68ff',
+          600: '#7C53FF',
+          700: '#6a3fe8',
+          800: '#5732c0',
+          900: '#47299a',
+          950: '#2a1862',
         },
       },
       fontFamily: {

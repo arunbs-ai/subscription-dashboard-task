@@ -1,24 +1,19 @@
-/**
- * Standalone Seed Runner
- * Run with: npm run seed
- * This connects to MongoDB, seeds roles + admin account, then exits.
- */
 import mongoose from 'mongoose';
 import { config } from '../config/config.js';
 import { seedRolesAndAdmin } from './seed.js';
 
 const run = async (): Promise<void> => {
   try {
-    console.log('🔌 [SEED] Connecting to MongoDB...');
+    console.log('[SEED] Connecting to MongoDB...');
     await mongoose.connect(config.mongoUri);
-    console.log('✅ [SEED] Connected to MongoDB:', config.mongoUri);
+    console.log('[SEED] Connected to MongoDB:', config.mongoUri);
 
     await seedRolesAndAdmin();
 
-    console.log('\n✅ [SEED] Seeding complete.');
+    console.log('\n[SEED] Seeding complete.');
     process.exit(0);
   } catch (error) {
-    console.error('❌ [SEED] Failed:', error);
+    console.error('[SEED] Failed:', error);
     process.exit(1);
   }
 };

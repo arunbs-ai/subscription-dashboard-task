@@ -22,7 +22,6 @@ const initialState: PlanState = {
   adminNotification: null,
 };
 
-// ─── Thunks ───────────────────────────────────────────────────────────────────
 export const fetchActivePlans = createAsyncThunk(
   'plans/fetchActive',
   async (_, { rejectWithValue }) => {
@@ -107,7 +106,6 @@ export const toggleActivePlanThunk = createAsyncThunk(
   }
 );
 
-// ─── Slice ────────────────────────────────────────────────────────────────────
 export const planSlice = createSlice({
   name: 'plans',
   initialState,

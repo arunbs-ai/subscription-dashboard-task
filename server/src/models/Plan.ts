@@ -14,6 +14,8 @@ export interface IPlan extends Document {
   currency: string;
   billingCycle: 'monthly' | 'yearly' | 'both';
   features: IPlanFeature[];
+  tier: 'starter' | 'pro' | 'enterprise';
+  apiRequests: number;
   maxUsers: number;
   maxProjects: number;
   storageGB: number;
@@ -35,12 +37,9 @@ const planSchema = new Schema<IPlan>(
     yearlyPrice: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'USD', uppercase: true, trim: true },
     billingCycle: { type: String, enum: ['monthly', 'yearly', 'both'], default: 'both' },
-    features: [
-      {
-        label: { type: String, required: true },
-        included: { type: Boolean, default: true },
-      },
-    ],
+    features: [{ label: { type: String, required: true }, included: { type: Boolean, default: true } }],
+    tier: { type: String, enum: ['starter', 'pro', 'enterprise'], default: 'pro' },
+    apiRequests: { type: Number, default: 50000, min: 0 },
     maxUsers: { type: Number, default: 1, min: 1 },
     maxProjects: { type: Number, default: 1 },
     storageGB: { type: Number, default: 5 },

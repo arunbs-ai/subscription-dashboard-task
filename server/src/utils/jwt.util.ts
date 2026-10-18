@@ -24,9 +24,9 @@ export const generateRefreshToken = (payload: RefreshTokenPayload): string => {
 };
 
 export const verifyAccessToken = (token: string): TokenPayload => {
-  return jwt.verify(token, config.jwt.accessSecret) as TokenPayload;
+  return jwt.verify(token, config.jwt.accessSecret, { algorithms: ['HS256'] }) as TokenPayload;
 };
 
 export const verifyRefreshToken = (token: string): RefreshTokenPayload => {
-  return jwt.verify(token, config.jwt.refreshSecret) as RefreshTokenPayload;
+  return jwt.verify(token, config.jwt.refreshSecret, { algorithms: ['HS256'] }) as RefreshTokenPayload;
 };

@@ -24,7 +24,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   const getBarColor = (pct: number) => {
     if (pct >= 90) return 'bg-rose-500';
     if (pct >= 75) return 'bg-amber-500';
-    return 'bg-indigo-600 dark:bg-indigo-500';
+    return 'bg-brand-600 dark:bg-brand-500';
   };
 
   return (

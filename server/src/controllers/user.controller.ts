@@ -4,9 +4,6 @@ import { User } from '../models/User.js';
 import { IRole } from '../models/Role.js';
 
 export class UserController {
-  /**
-   * Get Current User Profile (Self)
-   */
   static async getProfile(
     req: AuthenticatedRequest,
     res: Response,
@@ -39,9 +36,6 @@ export class UserController {
     }
   }
 
-  /**
-   * Update Profile Details (Self)
-   */
   static async updateProfile(
     req: AuthenticatedRequest,
     res: Response,
@@ -53,7 +47,19 @@ export class UserController {
         return;
       }
 
-      const { name, company, phone } = req.body;
+      const { name, email, company, phone } = req.body;
+
+      if (email && email !== req.user.email) {
+        const taken = await User.findOne({ email, _id: { $ne: req.user._id } });
+        if (taken) {
+          res.status(409).json({
+            success: false,
+            message: 'An account with this email address already exists.',
+          });
+          return;
+        }
+        req.user.email = email;
+      }
 
       if (name) req.user.name = name;
       if (company !== undefined) req.user.company = company;
@@ -83,9 +89,6 @@ export class UserController {
     }
   }
 
-  /**
-   * Change Password (Self)
-   */
   static async changePassword(
     req: AuthenticatedRequest,
     res: Response,
@@ -99,7 +102,6 @@ export class UserController {
 
       const { currentPassword, newPassword } = req.body;
 
-      // Verify current password
       const isMatch = await req.user.comparePassword(currentPassword);
       if (!isMatch) {
         res.status(400).json({
@@ -109,7 +111,6 @@ export class UserController {
         return;
       }
 
-      // Assign new password (pre-save hook hashes with bcrypt)
       req.user.password = newPassword;
       await req.user.save();
 
@@ -122,9 +123,6 @@ export class UserController {
     }
   }
 
-  /**
-   * Admin: Get All Users with Populated Roles
-   */
   static async getAllUsers(
     _req: AuthenticatedRequest,
     res: Response,

@@ -5,7 +5,6 @@ import { PlanFeature } from '../models/PlanFeature.js';
 import { UserCard } from '../models/UserCard.js';
 import { AuthenticatedRequest } from '../middlewares/auth.middleware.js';
 
-// ─── Helper: Auto-activate scheduled subscriptions if current has ended ────────
 const checkAndPromoteSubscriptions = async (userId: any) => {
   const now = new Date();
   const activeSub = await Subscription.findOne({
@@ -14,7 +13,6 @@ const checkAndPromoteSubscriptions = async (userId: any) => {
   });
 
   if (activeSub && activeSub.endDate <= now) {
-    // Current active plan has ended
     const scheduledSub = await Subscription.findOne({
       userId,
       status: 'scheduled',
@@ -22,26 +20,24 @@ const checkAndPromoteSubscriptions = async (userId: any) => {
     });
 
     if (scheduledSub) {
-      activeSub.status = 'expired';
+      activeSub.status = activeSub.cancelAtPeriodEnd ? 'cancelled' : 'expired';
       await activeSub.save();
 
       scheduledSub.status = 'active';
       scheduledSub.startDate = now;
       await scheduledSub.save();
     } else {
-      activeSub.status = 'expired';
+      activeSub.status = activeSub.cancelAtPeriodEnd ? 'cancelled' : 'expired';
       await activeSub.save();
     }
   }
 };
 
 export class SubscriptionController {
-  // ─── GET My Subscription (User Dashboard) ───────────────────────────────────
   static async getMySubscription(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!._id;
 
-      // Check auto-promotion
       await checkAndPromoteSubscriptions(userId);
 
       const activeSub = await Subscription.findOne({
@@ -69,20 +65,28 @@ export class SubscriptionController {
         scheduledPlanFeatures = await PlanFeature.find({ planId: (scheduledSub.planId as any)._id }).sort({ order: 1 });
       }
 
-      // Default mock invoices based on active subscription
-      const invoices = activeSub
-        ? [
-            {
-              id: 'inv_' + activeSub._id.toString().slice(-6) + '_01',
-              date: activeSub.startDate.toISOString(),
-              amount: activeSub.price,
-              currency: activeSub.currency,
-              status: 'paid',
-            },
-          ]
-        : [];
+      const allSubs = await Subscription.find({ userId }).populate('planId', 'name').sort({ createdAt: -1 });
+      const invoices = allSubs.map((sub) => {
+        const planName = (sub.planId as any)?.name || 'Plan';
+        const kind = sub.changeType || 'new';
+        const description =
+          kind === 'new'
+            ? `Purchase: ${planName}`
+            : `${kind === 'upgrade' ? 'Upgrade' : 'Downgrade'}: ${sub.previousPlanName || 'Previous plan'} to ${planName}`;
+        return {
+          id: ('INV-' + sub._id.toString().slice(-8)).toUpperCase(),
+          date: sub.createdAt.toISOString(),
+          amount: sub.price,
+          currency: sub.currency,
+          status: 'paid',
+          description,
+          changeType: kind,
+          planName,
+          billingCycle: sub.billingCycle,
+          subscriptionStatus: sub.status,
+        };
+      });
 
-      // Realistic usage stats matching current plan limits
       const plan = activeSub?.planId as any;
       const usage = {
         teamMembers: {
@@ -133,7 +137,6 @@ export class SubscriptionController {
     }
   }
 
-  // ─── POST Purchase / Subscribe to Plan ──────────────────────────────────────
   static async purchaseSubscription(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!._id;
@@ -144,18 +147,28 @@ export class SubscriptionController {
         return;
       }
 
-      // 1. Verify Plan
       const plan = await Plan.findById(planId);
       if (!plan || plan.isDeleted || !plan.isActive) {
         res.status(404).json({ success: false, message: 'Plan is either not found or currently inactive.' });
         return;
       }
 
-      // 2. Handle Payment Card
       let finalCardId = cardId;
       if (!finalCardId && cardDetails) {
         const { holderName, brand, cardNumber, last4, expMonth, expYear } = cardDetails;
-        const finalLast4 = cardNumber ? cardNumber.replace(/\s+/g, '').slice(-4) : (last4 || '4242');
+        const finalLast4 = cardNumber ? cardNumber.replace(/\s+/g, '').slice(-4) : last4;
+        const m = Number(expMonth);
+        const y = Number(expYear);
+        const now = new Date();
+        if (
+          !/^\d{4}$/.test(String(finalLast4 || '')) ||
+          !(m >= 1 && m <= 12) ||
+          y < now.getFullYear() ||
+          (y === now.getFullYear() && m < now.getMonth() + 1)
+        ) {
+          res.status(400).json({ success: false, message: 'Please provide valid card details.' });
+          return;
+        }
         const userCard = await UserCard.create({
           userId,
           holderName: holderName ? holderName.trim() : req.user!.name,
@@ -167,124 +180,156 @@ export class SubscriptionController {
         });
         finalCardId = userCard._id;
       } else if (!finalCardId) {
-        // Find user's default card or most recent card
         const existingCard = await UserCard.findOne({ userId }).sort({ isDefault: -1, createdAt: -1 });
         if (existingCard) {
           finalCardId = existingCard._id;
         } else {
-          // Create dummy default card for user
-          const defaultCard = await UserCard.create({
-            userId,
-            holderName: req.user!.name,
-            brand: 'Visa',
-            last4: '4242',
-            expMonth: 12,
-            expYear: 2028,
-            isDefault: true,
+          res.status(400).json({
+            success: false,
+            message: 'Please add a payment card before buying a plan.',
           });
-          finalCardId = defaultCard._id;
+          return;
         }
       }
 
-      // 3. Promote / Expire checks
       await checkAndPromoteSubscriptions(userId);
 
       const activeSub = await Subscription.findOne({
         userId,
         status: 'active',
         endDate: { $gt: new Date() },
-      });
-
-      const existingScheduledSub = await Subscription.findOne({
-        userId,
-        status: 'scheduled',
-      });
-
-      // ─── RULE: If active plan exists AND already purchased another plan, don't allow!
-      if (activeSub && existingScheduledSub) {
-        res.status(400).json({
-          success: false,
-          message:
-            'You already have an active subscription and an upcoming plan queued. You cannot purchase another plan until the queued plan starts.',
-        });
-        return;
-      }
+      }).populate('planId');
 
       const cycle = billingCycle === 'yearly' ? 'yearly' : 'monthly';
       const price = cycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
       const durationMs = cycle === 'yearly' ? 365 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+      const now = new Date();
 
-      let newSubscription: ISubscription;
+      let changeType: 'new' | 'upgrade' | 'downgrade' = 'new';
+      let previousPlanName = '';
 
       if (activeSub) {
-        // ─── RULE: If active plan exists, schedule only AFTER current plan ends
-        const startDate = new Date(activeSub.endDate);
-        const endDate = new Date(startDate.getTime() + durationMs);
+        const currentPlan = activeSub.planId as any;
+        previousPlanName = currentPlan?.name || 'Previous plan';
 
-        newSubscription = await Subscription.create({
-          userId,
-          planId: plan._id,
-          cardId: finalCardId,
-          status: 'scheduled',
-          scheduleType: 'after_current_plan',
-          billingCycle: cycle,
-          price,
-          currency: plan.currency || 'USD',
-          startDate,
-          endDate,
-          cancelAtPeriodEnd: false,
-        });
+        if (currentPlan && String(currentPlan._id) === String(plan._id) && activeSub.billingCycle === cycle) {
+          res.status(400).json({ success: false, message: 'You are already subscribed to this plan.' });
+          return;
+        }
 
-        res.status(201).json({
-          success: true,
-          message: `Plan purchased successfully! Scheduled to start on ${startDate.toLocaleDateString()} after your current plan completes.`,
-          data: { subscription: newSubscription, scheduleType: 'after_current_plan' },
-        });
-      } else {
-        // ─── RULE: If NO active plan, start from now automatically
-        const startDate = new Date();
-        const endDate = new Date(startDate.getTime() + durationMs);
+        changeType = plan.monthlyPrice >= (currentPlan?.monthlyPrice ?? 0) ? 'upgrade' : 'downgrade';
 
-        newSubscription = await Subscription.create({
-          userId,
-          planId: plan._id,
-          cardId: finalCardId,
-          status: 'active',
-          scheduleType: 'start_now',
-          billingCycle: cycle,
-          price,
-          currency: plan.currency || 'USD',
-          startDate,
-          endDate,
-          cancelAtPeriodEnd: false,
-        });
-
-        res.status(201).json({
-          success: true,
-          message: 'Plan purchased successfully and activated immediately.',
-          data: { subscription: newSubscription, scheduleType: 'start_now' },
-        });
+        activeSub.status = 'cancelled';
+        activeSub.cancelAtPeriodEnd = false;
+        activeSub.cancelledAt = now;
+        activeSub.cancellationMode = 'plan_change';
+        activeSub.cancellationReason = `Replaced by ${changeType} to ${plan.name}`;
+        activeSub.endDate = now;
+        await activeSub.save();
       }
+
+      await Subscription.updateMany(
+        { userId, status: 'scheduled' },
+        {
+          status: 'cancelled',
+          cancelledAt: now,
+          cancellationMode: 'plan_change',
+          cancellationReason: `Replaced by plan change to ${plan.name}`,
+        }
+      );
+
+      const newSubscription: ISubscription = await Subscription.create({
+        userId,
+        planId: plan._id,
+        cardId: finalCardId,
+        status: 'active',
+        scheduleType: 'start_now',
+        billingCycle: cycle,
+        price,
+        currency: plan.currency || 'USD',
+        startDate: now,
+        endDate: new Date(now.getTime() + durationMs),
+        cancelAtPeriodEnd: false,
+        changeType,
+        previousPlanName,
+      });
+
+      const message =
+        changeType === 'new'
+          ? 'Plan purchased successfully and activated immediately.'
+          : `Plan ${changeType} successful. ${plan.name} is active now and your ${previousPlanName} plan was cancelled.`;
+
+      res.status(201).json({
+        success: true,
+        message,
+        data: { subscription: newSubscription, changeType },
+      });
     } catch (error) {
       next(error);
     }
   }
 
-  // ─── Cancel Subscription (at period end) ────────────────────────────────────
   static async cancelSubscription(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!._id;
-      const subscription = await Subscription.findOne({
-        userId,
-        status: 'active',
-      });
+      const { immediately = false, reason = '', subscriptionId } = req.body || {};
+      const note = String(reason).trim().slice(0, 300);
+      const now = new Date();
 
+      if (subscriptionId) {
+        const queued = await Subscription.findOne({ _id: subscriptionId, userId, status: 'scheduled' });
+        if (!queued) {
+          res.status(404).json({ success: false, message: 'Queued subscription not found.' });
+          return;
+        }
+        queued.status = 'cancelled';
+        queued.cancelledAt = now;
+        queued.cancellationMode = 'immediate';
+        queued.cancellationReason = note;
+        await queued.save();
+        res.status(200).json({ success: true, message: 'Your upcoming plan has been cancelled.', data: { subscription: queued } });
+        return;
+      }
+
+      const subscription = await Subscription.findOne({ userId, status: 'active' });
       if (!subscription) {
         res.status(404).json({ success: false, message: 'No active subscription found to cancel.' });
         return;
       }
 
+      if (immediately) {
+        subscription.status = 'cancelled';
+        subscription.cancelAtPeriodEnd = false;
+        subscription.cancelledAt = now;
+        subscription.cancellationMode = 'immediate';
+        subscription.cancellationReason = note;
+        subscription.endDate = now;
+        await subscription.save();
+
+        const queued = await Subscription.findOne({ userId, status: 'scheduled' }).sort({ startDate: 1 });
+        if (queued) {
+          const duration = queued.endDate.getTime() - queued.startDate.getTime();
+          queued.status = 'active';
+          queued.scheduleType = 'start_now';
+          queued.startDate = now;
+          queued.endDate = new Date(now.getTime() + duration);
+          await queued.save();
+        }
+
+        res.status(200).json({
+          success: true,
+          message: queued
+            ? 'Your subscription was cancelled. Your queued plan is now active.'
+            : 'Your subscription was cancelled immediately.',
+          data: { subscription },
+        });
+        return;
+      }
+
       subscription.cancelAtPeriodEnd = true;
+      subscription.cancelledAt = now;
+      subscription.cancellationMode = 'period_end';
+      subscription.cancellationReason = note;
       await subscription.save();
 
       res.status(200).json({
@@ -297,7 +342,49 @@ export class SubscriptionController {
     }
   }
 
-  // ─── Reactivate Subscription ────────────────────────────────────────────────
+  static async getSubscriptionHistory(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const userId = req.user!._id;
+      await checkAndPromoteSubscriptions(userId);
+      const subs = await Subscription.find({ userId })
+        .populate('planId', 'name tier monthlyPrice yearlyPrice')
+        .populate('cardId', 'brand last4')
+        .sort({ createdAt: -1 });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          history: subs.map((s) => {
+            const plan = s.planId as any;
+            const card = s.cardId as any;
+            return {
+              id: s._id,
+              planName: plan?.name || 'Plan',
+              tier: plan?.tier || null,
+              status: s.status,
+              billingCycle: s.billingCycle,
+              price: s.price,
+              currency: s.currency,
+              startDate: s.startDate,
+              endDate: s.endDate,
+              scheduleType: s.scheduleType,
+              changeType: s.changeType || 'new',
+              previousPlanName: s.previousPlanName || '',
+              cancelAtPeriodEnd: s.cancelAtPeriodEnd,
+              cancelledAt: s.cancelledAt || null,
+              cancellationMode: s.cancellationMode || null,
+              cancellationReason: s.cancellationReason || '',
+              card: card ? { brand: card.brand, last4: card.last4 } : null,
+              createdAt: s.createdAt,
+            };
+          }),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async reactivateSubscription(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const userId = req.user!._id;
@@ -312,6 +399,9 @@ export class SubscriptionController {
       }
 
       subscription.cancelAtPeriodEnd = false;
+      subscription.cancelledAt = null;
+      subscription.cancellationMode = null;
+      subscription.cancellationReason = '';
       await subscription.save();
 
       res.status(200).json({
@@ -324,12 +414,11 @@ export class SubscriptionController {
     }
   }
 
-  // ─── ADMIN: Get All Subscribers ─────────────────────────────────────────────
   static async getAdminSubscribers(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const subscriptions = await Subscription.find()
         .populate('userId', 'name email company phone createdAt')
-        .populate('planId', 'name description monthlyPrice yearlyPrice maxUsers storageGB')
+        .populate('planId', 'name tier description monthlyPrice yearlyPrice maxUsers storageGB')
         .populate('cardId', 'brand last4 expMonth expYear')
         .sort({ createdAt: -1 });
 
@@ -338,7 +427,6 @@ export class SubscriptionController {
       const scheduledCount = subscriptions.filter((s) => s.status === 'scheduled').length;
       const cancelledCount = subscriptions.filter((s) => s.cancelAtPeriodEnd || s.status === 'cancelled').length;
 
-      // Estimate MRR (Monthly Recurring Revenue)
       const mrr = subscriptions
         .filter((s) => s.status === 'active')
         .reduce((sum, s) => {

@@ -14,10 +14,8 @@ import { TokenStorage } from './services/api';
 export const App: React.FC = () => {
   const dispatch = useAppDispatch();
 
-  // On app mount, rehydrate user session if token exists
   useEffect(() => {
-    const token = TokenStorage.getAccess();
-    if (token) {
+    if (TokenStorage.getAccess() || TokenStorage.getRefresh()) {
       dispatch(getMeThunk());
     }
   }, [dispatch]);
@@ -26,15 +24,12 @@ export const App: React.FC = () => {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<AppLayout />}>
-          {/* Default redirect */}
           <Route index element={<Navigate to="/plans" replace />} />
 
-          {/* Public routes */}
           <Route path="plans" element={<PlansPage />} />
           <Route path="login" element={<LoginPage />} />
           <Route path="register" element={<RegisterPage />} />
 
-          {/* User protected: /dashboard (admins not allowed) */}
           <Route
             path="dashboard"
             element={
@@ -44,7 +39,6 @@ export const App: React.FC = () => {
             }
           />
 
-          {/* Admin protected: /admin/subscriptions */}
           <Route
             path="admin/subscriptions"
             element={
@@ -54,7 +48,6 @@ export const App: React.FC = () => {
             }
           />
 
-          {/* Catch-all */}
           <Route path="*" element={<Navigate to="/plans" replace />} />
         </Route>
       </Routes>

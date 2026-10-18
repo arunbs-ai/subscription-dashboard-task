@@ -1,27 +1,40 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Ensure .env is loaded whether running from workspace root or server directory
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 dotenv.config({ path: path.resolve(process.cwd(), 'server/.env') });
 dotenv.config();
 
+const env = (name: string): string => {
+  const value = process.env[name];
+  if (value === undefined || value === '') {
+    throw new Error(`Missing required environment variable: ${name}. Add it to server/.env`);
+  }
+  return value;
+};
 
 export const config = {
-  port: process.env.PORT || 5000,
-  nodeEnv: process.env.NODE_ENV || 'development',
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
-  mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/subpulse_db',
+  port: Number(env('PORT')),
+  nodeEnv: env('NODE_ENV'),
+  clientUrl: env('CLIENT_URL'),
+  mongoUri: env('MONGODB_URI'),
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET || 'subpulse_access_secret_key_default',
-    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'subpulse_refresh_secret_key_default',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+    accessSecret: env('JWT_ACCESS_SECRET'),
+    accessExpiresIn: env('JWT_ACCESS_EXPIRES_IN'),
+    refreshSecret: env('JWT_REFRESH_SECRET'),
+    refreshExpiresIn: env('JWT_REFRESH_EXPIRES_IN'),
+  },
+  security: {
+    bodyLimit: env('BODY_LIMIT'),
+    trustProxy: Number(env('TRUST_PROXY')),
+    rateLimitWindowMs: Number(env('RATE_LIMIT_WINDOW_MS')),
+    rateLimitMax: Number(env('RATE_LIMIT_MAX')),
+    authRateLimitMax: Number(env('AUTH_RATE_LIMIT_MAX')),
   },
   adminSeed: {
-    name: process.env.ADMIN_NAME || 'System Administrator',
-    email: process.env.ADMIN_EMAIL || 'admin@subpulse.io',
-    password: process.env.ADMIN_PASSWORD || 'Admin@12345',
-    company: process.env.ADMIN_COMPANY || 'SubPulse Systems HQ',
+    name: env('ADMIN_NAME'),
+    email: env('ADMIN_EMAIL'),
+    password: env('ADMIN_PASSWORD'),
+    company: env('ADMIN_COMPANY'),
   },
 };

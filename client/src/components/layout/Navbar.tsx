@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   CreditCard,
@@ -9,14 +9,15 @@ import {
   Menu,
   X,
   ChevronDown,
-  Sparkles,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../../store';
-import { logout, switchRole, logoutThunk } from '../../store/slices/authSlice';
+import { logout, logoutThunk } from '../../store/slices/authSlice';
 import { ThemeToggle } from '../common/ThemeToggle';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { ProfileModal } from '../common/ProfileModal';
+import { toTitleCase } from '../../utils/text';
+import { env } from '../../config/env';
 
 export const Navbar: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -51,15 +52,6 @@ export const Navbar: React.FC = () => {
     navigate('/login');
   };
 
-  const toggleRole = () => {
-    const nextRole = role === 'admin' ? 'user' : 'admin';
-    dispatch(switchRole(nextRole));
-    // If switching to admin while on /dashboard, redirect to /admin/subscriptions
-    if (nextRole === 'admin' && location.pathname === '/dashboard') {
-      navigate('/admin/subscriptions');
-    }
-  };
-
   const isActive = (path: string) => location.pathname === path;
 
   const getInitials = (fullName: string) => {
@@ -74,40 +66,34 @@ export const Navbar: React.FC = () => {
       <nav className="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            {/* Brand Logo */}
             <div className="flex items-center gap-8">
               <Link to="/plans" className="flex items-center gap-2.5 group">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-brand-500 flex items-center justify-center text-white shadow-md shadow-brand-500/20 group-hover:scale-105 transition-transform">
                   <CreditCard className="w-5 h-5" />
                 </div>
                 <div className="flex flex-col">
                   <span className="text-lg font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1">
-                    SubPulse
-                    <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/50">
-                      v1.0
-                    </span>
+                    {env.appName}
                   </span>
                 </div>
               </Link>
 
-              {/* Desktop Nav Links */}
               <div className="hidden md:flex items-center space-x-1">
                 <Link
                   to="/plans"
                   className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors ${isActive('/plans')
-                    ? 'bg-slate-100 text-indigo-600 dark:bg-slate-800 dark:text-indigo-400 font-semibold'
+                    ? 'bg-slate-100 text-brand-600 dark:bg-slate-800 dark:text-brand-400 font-semibold'
                     : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/50'
                     }`}
                 >
                   Plans & Pricing
                 </Link>
 
-                {/* Only regular users see "My Subscription" */}
                 {isAuthenticated && role === 'user' && (
                   <Link
                     to="/dashboard"
                     className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors ${isActive('/dashboard')
-                      ? 'bg-slate-100 text-indigo-600 dark:bg-slate-800 dark:text-indigo-400 font-semibold'
+                      ? 'bg-slate-100 text-brand-600 dark:bg-slate-800 dark:text-brand-400 font-semibold'
                       : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/50'
                       }`}
                   >
@@ -115,50 +101,31 @@ export const Navbar: React.FC = () => {
                   </Link>
                 )}
 
-                {/* Only admin sees "Admin Subscriptions" */}
                 {isAuthenticated && role === 'admin' && (
                   <Link
                     to="/admin/subscriptions"
                     className={`px-3 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5 ${isActive('/admin/subscriptions')
-                      ? 'bg-slate-100 text-indigo-600 dark:bg-slate-800 dark:text-indigo-400 font-semibold'
+                      ? 'bg-slate-100 text-brand-600 dark:bg-slate-800 dark:text-brand-400 font-semibold'
                       : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/50'
                       }`}
                   >
-                    <Shield className="w-3.5 h-3.5 text-indigo-500" />
+                    <Shield className="w-3.5 h-3.5 text-brand-500" />
                     Customer Subscriptions
                   </Link>
                 )}
               </div>
             </div>
 
-            {/* Right Side actions */}
             <div className="hidden md:flex items-center gap-3">
-              {/* Quick RBAC Role Tester Badge */}
-              {isAuthenticated && (
-                <button
-                  type="button"
-                  onClick={toggleRole}
-                  title="Click to toggle RBAC Role between User and Admin"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors"
-                >
-                  <Sparkles className="w-3 h-3 text-amber-500" />
-                  <span>Role: <strong>{role.toUpperCase()}</strong></span>
-                  <span className="text-[10px] text-slate-400 font-normal">(switch)</span>
-                </button>
-              )}
-
-              {/* Theme toggle */}
               <ThemeToggle />
 
-              {/* User Dropdown or Login buttons */}
               {isAuthenticated && user ? (
                 <div className="relative" ref={dropdownRef}>
                   <button
                     onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                     className="flex items-center gap-2.5 p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus:outline-none"
                   >
-                    {/* User profile avatar based on name initials */}
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-bold text-xs flex items-center justify-center ring-2 ring-indigo-500/20 shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-600 to-brand-600 text-white font-bold text-xs flex items-center justify-center ring-2 ring-brand-500/20 shrink-0">
                       {getInitials(user.name)}
                     </div>
                     <div className="text-left hidden lg:block">
@@ -170,11 +137,10 @@ export const Navbar: React.FC = () => {
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                   </button>
 
-                  {/* Dropdown Menu */}
                   {isDropdownOpen && (
                     <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200/80 dark:border-slate-800 py-2 z-50 animate-in fade-in zoom-in-95">
                       <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-brand-600 to-brand-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
                           {getInitials(user.name)}
                         </div>
                         <div className="min-w-0 flex-1">
@@ -191,7 +157,6 @@ export const Navbar: React.FC = () => {
                       </div>
 
                       <div className="py-1">
-                        {/* Only User sees My Subscription */}
                         {role === 'user' && (
                           <Link
                             to="/dashboard"
@@ -203,14 +168,13 @@ export const Navbar: React.FC = () => {
                           </Link>
                         )}
 
-                        {/* Admin sees Subscription Management */}
                         {role === 'admin' && (
                           <Link
                             to="/admin/subscriptions"
                             onClick={() => setIsDropdownOpen(false)}
                             className="flex items-center gap-2.5 px-4 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70"
                           >
-                            <Shield className="w-4 h-4 text-indigo-500" />
+                            <Shield className="w-4 h-4 text-brand-500" />
                             Customer Subscriptions
                           </Link>
                         )}
@@ -256,7 +220,6 @@ export const Navbar: React.FC = () => {
               )}
             </div>
 
-            {/* Mobile menu button */}
             <div className="flex md:hidden items-center gap-2">
               <ThemeToggle />
               <button
@@ -269,7 +232,6 @@ export const Navbar: React.FC = () => {
           </div>
         </div>
 
-        {/* Mobile Drawer Menu */}
         {isMenuOpen && (
           <div className="md:hidden border-t border-slate-200/80 dark:border-slate-800 px-4 pt-3 pb-6 space-y-3 bg-white dark:bg-slate-900 animate-in slide-in-from-top-3">
             <div className="space-y-1">
@@ -293,7 +255,7 @@ export const Navbar: React.FC = () => {
                 <Link
                   to="/admin/subscriptions"
                   onClick={() => setIsMenuOpen(false)}
-                  className="block px-3 py-2 rounded-xl text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20"
+                  className="block px-3 py-2 rounded-xl text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/20"
                 >
                   Customer Subscriptions
                 </Link>
@@ -302,12 +264,6 @@ export const Navbar: React.FC = () => {
 
             {isAuthenticated && (
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                <button
-                  onClick={toggleRole}
-                  className="w-full text-left px-3 py-2 rounded-xl text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-                >
-                  Switch Role: <strong>{role.toUpperCase()}</strong> (click to change)
-                </button>
                 <button
                   onClick={() => {
                     setIsMenuOpen(false);
@@ -344,7 +300,6 @@ export const Navbar: React.FC = () => {
         )}
       </nav>
 
-      {/* User Profile Modal */}
       <ProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
